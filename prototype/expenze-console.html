@@ -1,0 +1,1222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Expenze Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+:root {
+  --paper:#F4F5F2; --surface:#FFFFFF; --surface-2:#ECEEE9;
+  --ink:#17191C; --ink-2:#3D4148; --muted:#6A6E67;
+  --rule:#DCDDD7; --rule-firm:#C2C4BC;
+  --ok:#1E7047; --ok-bg:#E4F0E8;
+  --warn:#96610F; --warn-bg:#F6EDDC;
+  --bad:#9E2F27; --bad-bg:#F6E4E2;
+  --review:#4A5768; --review-bg:#E6E9EE;
+  --focus:#17191C; --radius:3px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:#131513; --surface:#1B1D1B; --surface-2:#232622;
+    --ink:#ECEEE8; --ink-2:#C3C7BE; --muted:#8D9289;
+    --rule:#32352F; --rule-firm:#454941;
+    --ok:#6FC393; --ok-bg:#16301F;
+    --warn:#DBA65C; --warn-bg:#33260F;
+    --bad:#E08A82; --bad-bg:#351B18;
+    --review:#A2AFC2; --review-bg:#1E242C;
+    --focus:#ECEEE8;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:#131513; --surface:#1B1D1B; --surface-2:#232622;
+  --ink:#ECEEE8; --ink-2:#C3C7BE; --muted:#8D9289;
+  --rule:#32352F; --rule-firm:#454941;
+  --ok:#6FC393; --ok-bg:#16301F;
+  --warn:#DBA65C; --warn-bg:#33260F;
+  --bad:#E08A82; --bad-bg:#351B18;
+  --review:#A2AFC2; --review-bg:#1E242C;
+  --focus:#ECEEE8;
+}
+* { box-sizing:border-box; }
+body { background:var(--paper); color:var(--ink); font-family:"Archivo",ui-sans-serif,system-ui,sans-serif; font-size:15px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+.wrap { max-width:1320px; margin:0 auto; padding:22px 20px 60px; display:flex; flex-direction:column; gap:20px; }
+
+/* masthead + identity */
+.masthead { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:14px 24px; padding-bottom:14px; border-bottom:2px solid var(--ink); }
+.brand h1 { margin:0; font-size:clamp(1.4rem,1.25rem + .85vw,1.8rem); font-weight:700; letter-spacing:-.022em; }
+.brand p { margin:3px 0 0; color:var(--muted); font-size:.84rem; max-width:58ch; }
+.session { display:flex; align-items:center; gap:10px; }
+.avatar { width:38px; height:38px; border-radius:50%; display:grid; place-items:center; background:var(--ink); color:var(--paper); font-weight:600; font-size:.85rem; letter-spacing:.02em; flex:none; }
+.session .idn { display:flex; flex-direction:column; line-height:1.3; }
+.session .nm { font-weight:600; font-size:.88rem; }
+.session .rl { font-family:"IBM Plex Mono",monospace; font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+.session select { font-family:"IBM Plex Mono",monospace; font-size:.72rem; padding:5px 6px; background:var(--surface); color:var(--ink); border:1px solid var(--rule-firm); border-radius:var(--radius); }
+.session .as { font-family:"IBM Plex Mono",monospace; font-size:.6rem; color:var(--muted); text-transform:uppercase; letter-spacing:.07em; display:block; margin-bottom:2px; }
+
+/* nav */
+.nav { display:flex; gap:4px; border-bottom:1px solid var(--rule); }
+.nav button { font:inherit; font-size:.86rem; font-weight:500; padding:9px 15px; background:none; border:none; border-bottom:2px solid transparent; color:var(--muted); cursor:pointer; margin-bottom:-1px; display:inline-flex; align-items:center; gap:7px; }
+.nav button:hover { color:var(--ink); }
+.nav button[aria-current="true"] { color:var(--ink); border-bottom-color:var(--ink); font-weight:600; }
+.nav .lock { font-family:"IBM Plex Mono",monospace; font-size:.6rem; text-transform:uppercase; letter-spacing:.06em; border:1px solid var(--rule-firm); border-radius:var(--radius); padding:1px 5px; color:var(--muted); }
+
+.panel { background:var(--surface); border:1px solid var(--rule); border-radius:var(--radius); }
+.panel > header { padding:10px 14px; border-bottom:1px solid var(--rule); display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.panel > header h2 { margin:0; font-size:.77rem; font-weight:600; text-transform:uppercase; letter-spacing:.08em; }
+.panel > header .sub { font-family:"IBM Plex Mono",monospace; font-size:.69rem; color:var(--muted); }
+.chip { font-family:"IBM Plex Mono",monospace; font-size:.67rem; padding:4px 8px; border:1px solid var(--rule-firm); border-radius:var(--radius); color:var(--ink-2); background:var(--surface); white-space:nowrap; }
+
+.intake { display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:1px; background:var(--rule); }
+.intake > div { background:var(--surface); padding:11px 14px; display:flex; flex-direction:column; gap:2px; }
+.intake .ch { font-family:"IBM Plex Mono",monospace; font-size:.65rem; text-transform:uppercase; letter-spacing:.09em; color:var(--muted); }
+.intake .n { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; font-size:1.3rem; font-weight:600; letter-spacing:-.02em; }
+.intake .sub2 { font-size:.73rem; color:var(--muted); }
+
+.triage { display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:var(--radius); overflow:hidden; }
+.triage > div { background:var(--surface); padding:13px 14px; display:flex; flex-direction:column; gap:3px; }
+.triage .k { font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+.triage .v { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; font-size:1.65rem; font-weight:600; letter-spacing:-.03em; line-height:1.1; }
+.triage .cleared .v { color:var(--ok); } .triage .queued .v { color:var(--review); }
+.triage .note { font-size:.73rem; color:var(--muted); }
+.triage .rate { background:var(--surface-2); }
+.bar { height:5px; background:var(--rule); border-radius:99px; overflow:hidden; margin-top:5px; }
+.bar > i { display:block; height:100%; background:var(--ok); transition:width .25s ease; }
+
+.split { display:grid; grid-template-columns:minmax(300px,.85fr) minmax(360px,1.15fr); gap:20px; align-items:start; }
+@media (max-width:920px){ .split { grid-template-columns:1fr; } }
+
+.queue { display:flex; flex-direction:column; }
+.qrow { display:grid; grid-template-columns:1fr auto; gap:3px 12px; padding:11px 14px; border:none; border-bottom:1px solid var(--rule); cursor:pointer; background:none; text-align:left; font:inherit; color:inherit; width:100%; transition:background .1s ease; }
+.qrow:last-child { border-bottom:none; }
+.qrow:hover { background:var(--surface-2); }
+.qrow[aria-current="true"] { background:var(--surface-2); box-shadow:inset 3px 0 0 var(--ink); }
+.qrow .top { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; min-width:0; }
+.qrow .vendor { font-weight:600; font-size:.89rem; letter-spacing:-.01em; }
+.qrow .who { font-size:.77rem; color:var(--muted); }
+.qrow .amt { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; font-size:.84rem; font-weight:500; white-space:nowrap; }
+.qrow .why { font-family:"IBM Plex Mono",monospace; font-size:.68rem; color:var(--review); grid-column:1/-1; }
+.qrow .meta { display:flex; gap:7px; align-items:center; grid-column:1/-1; margin-top:1px; }
+.src { font-family:"IBM Plex Mono",monospace; font-size:.62rem; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); border:1px solid var(--rule-firm); border-radius:var(--radius); padding:1px 5px; white-space:nowrap; }
+.age { font-family:"IBM Plex Mono",monospace; font-size:.65rem; color:var(--muted); }
+.queue-empty { padding:26px 14px; text-align:center; color:var(--muted); font-size:.85rem; }
+
+.verdict { display:flex; flex-wrap:wrap; align-items:center; gap:9px 12px; padding:13px 14px; border-bottom:1px solid var(--rule); }
+.badge { font-family:"IBM Plex Mono",monospace; font-size:.75rem; font-weight:600; letter-spacing:.04em; text-transform:uppercase; padding:6px 11px; border-radius:var(--radius); }
+.v-approved{background:var(--ok-bg);color:var(--ok);box-shadow:inset 3px 0 0 var(--ok);}
+.v-partially_approved{background:var(--warn-bg);color:var(--warn);box-shadow:inset 3px 0 0 var(--warn);}
+.v-rejected{background:var(--bad-bg);color:var(--bad);box-shadow:inset 3px 0 0 var(--bad);}
+.v-needs_review{background:var(--review-bg);color:var(--review);box-shadow:inset 3px 0 0 var(--review);}
+.route { margin-left:auto; font-family:"IBM Plex Mono",monospace; font-size:.67rem; color:var(--muted); text-align:right; }
+
+.recon { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--rule); border-bottom:1px solid var(--rule); }
+@media (max-width:460px){ .recon { grid-template-columns:1fr; } }
+.recon div { background:var(--surface); padding:12px 14px; display:flex; flex-direction:column; gap:2px; }
+.recon .k { font-size:.65rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+.recon .v { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; font-size:1.1rem; font-weight:600; letter-spacing:-.02em; }
+.recon .reimb .v { color:var(--ok); }
+.recon .disallowed .v.nonzero { color:var(--bad); }
+.recon .cap { font-size:.67rem; color:var(--muted); font-family:"IBM Plex Mono",monospace; }
+
+.controls { padding:10px 14px; border-bottom:1px solid var(--rule); display:flex; flex-wrap:wrap; align-items:center; gap:9px 16px; background:var(--surface-2); }
+.field { display:flex; align-items:center; gap:7px; }
+.field label { font-size:.69rem; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); font-weight:500; }
+input[type="number"], input[type="text"], select { font-family:"IBM Plex Mono",monospace; font-size:.78rem; padding:5px 7px; color:var(--ink); background:var(--surface); border:1px solid var(--rule-firm); border-radius:var(--radius); }
+input[type="number"] { width:66px; font-variant-numeric:tabular-nums; }
+input:disabled, select:disabled, .toggle.ro { opacity:.55; cursor:not-allowed; }
+.hint { font-size:.74rem; color:var(--muted); flex:1 1 200px; min-width:0; }
+
+.items-scroll { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:.81rem; }
+thead th { text-align:left; font-size:.64rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:600; padding:8px 14px; border-bottom:1px solid var(--rule); white-space:nowrap; }
+tbody td { padding:7px 14px; border-bottom:1px solid var(--rule); vertical-align:middle; }
+tbody tr:last-child td { border-bottom:none; }
+td.amt { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+tr.excluded td.desc, tr.excluded td.amt { color:var(--muted); text-decoration:line-through; text-decoration-thickness:1px; }
+tr.prorata td.disp { color:var(--warn); }
+td.disp { white-space:nowrap; font-family:"IBM Plex Mono",monospace; font-size:.69rem; }
+td.disp .yes { color:var(--ok); } td.disp .no { color:var(--bad); }
+
+.violation { display:grid; grid-template-columns:auto 1fr auto; gap:3px 11px; align-items:baseline; padding:10px 14px; border-bottom:1px solid var(--rule); }
+.violation:last-child { border-bottom:none; }
+.violation code { font-family:"IBM Plex Mono",monospace; font-size:.66rem; padding:2px 6px; border-radius:var(--radius); white-space:nowrap; }
+.violation.blocking code { background:var(--review-bg); color:var(--review); }
+.violation.deduct code { background:var(--warn-bg); color:var(--warn); }
+.violation .msg { font-size:.8rem; color:var(--ink-2); }
+.violation .amt { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; font-size:.8rem; color:var(--bad); white-space:nowrap; }
+.empty { padding:13px 14px; color:var(--muted); font-size:.81rem; }
+
+.thermal { padding:14px; font-family:"IBM Plex Mono",monospace; font-size:.72rem; line-height:1.6; white-space:pre-wrap; color:var(--ink-2); overflow:auto; max-height:230px; }
+.rationale { padding:14px; font-family:"Source Serif 4",Georgia,serif; font-size:.96rem; line-height:1.6; color:var(--ink-2); border-left:3px solid var(--rule-firm); margin:0; max-width:68ch; }
+.attribution { padding:0 14px 13px; font-family:"IBM Plex Mono",monospace; font-size:.66rem; color:var(--muted); margin:0; }
+
+.actions { display:flex; flex-wrap:wrap; gap:8px; padding:12px 14px; border-top:1px solid var(--rule); background:var(--surface-2); align-items:center; }
+.btn { font:inherit; font-size:.8rem; font-weight:500; padding:7px 13px; border-radius:var(--radius); border:1px solid var(--rule-firm); background:var(--surface); color:var(--ink); cursor:pointer; transition:background .12s ease,border-color .12s ease; }
+.btn:hover:not(:disabled) { border-color:var(--ink-2); }
+.btn:disabled { opacity:.45; cursor:not-allowed; }
+.btn.primary { background:var(--ink); color:var(--paper); border-color:var(--ink); }
+.btn.danger { color:var(--bad); border-color:var(--bad); }
+.stamp { font-family:"IBM Plex Mono",monospace; font-size:.71rem; color:var(--ok); }
+.stamp.pending { color:var(--muted); }
+
+/* rules view */
+.rules-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:1px; background:var(--rule); }
+.rules-grid > section { background:var(--surface); padding:14px; display:flex; flex-direction:column; gap:9px; }
+.rules-grid h3 { margin:0; font-size:.7rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:600; }
+.rules-grid p.desc { margin:0; font-size:.8rem; color:var(--muted); }
+.caprow { display:flex; align-items:center; gap:8px; }
+.caprow .ccy { font-family:"IBM Plex Mono",monospace; font-size:.8rem; width:44px; font-weight:600; }
+.caprow .per { font-size:.72rem; color:var(--muted); }
+.caprow .rm { font-family:"IBM Plex Mono",monospace; font-size:.72rem; background:none; border:none; color:var(--muted); cursor:pointer; padding:2px 5px; }
+.caprow .rm:hover { color:var(--bad); }
+.toggles { display:flex; flex-wrap:wrap; gap:6px; }
+.toggle { display:inline-flex; align-items:center; gap:6px; font-family:"IBM Plex Mono",monospace; font-size:.71rem; padding:5px 9px; border:1px solid var(--rule-firm); border-radius:var(--radius); background:var(--surface); cursor:pointer; color:var(--ink-2); }
+.toggle input { margin:0; accent-color:var(--ok); }
+.toggle.on { border-color:var(--ok); color:var(--ok); background:var(--ok-bg); }
+.toggle.locked { opacity:.6; cursor:not-allowed; }
+.radio { display:flex; align-items:flex-start; gap:8px; font-size:.81rem; color:var(--ink-2); cursor:pointer; }
+.radio input { margin-top:3px; accent-color:var(--ink); }
+.radio .sub3 { display:block; font-size:.74rem; color:var(--muted); }
+.banner { padding:11px 14px; font-size:.81rem; border-bottom:1px solid var(--rule); background:var(--review-bg); color:var(--review); display:flex; gap:9px; align-items:baseline; flex-wrap:wrap; }
+.banner code { font-family:"IBM Plex Mono",monospace; font-size:.75rem; }
+.impact { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--rule); border-top:1px solid var(--rule); }
+.impact > div { background:var(--surface-2); padding:12px 14px; display:flex; flex-direction:column; gap:2px; }
+.impact .k { font-size:.65rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+.impact .v { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; font-size:1.2rem; font-weight:600; }
+.impact .delta { font-family:"IBM Plex Mono",monospace; font-size:.72rem; }
+.impact .up { color:var(--ok); } .impact .down { color:var(--warn); }
+.changelog { display:flex; flex-direction:column; }
+.cl { display:grid; grid-template-columns:auto 1fr auto; gap:3px 11px; padding:9px 14px; border-bottom:1px solid var(--rule); align-items:baseline; font-size:.79rem; }
+.cl:last-child { border-bottom:none; }
+.cl .ver { font-family:"IBM Plex Mono",monospace; font-size:.68rem; color:var(--muted); }
+.cl .by { font-family:"IBM Plex Mono",monospace; font-size:.68rem; color:var(--muted); white-space:nowrap; }
+.cl .what { color:var(--ink-2); }
+
+:is(button,select,input):focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+
+.people-add { display:flex; flex-wrap:wrap; gap:8px; padding:12px 14px; background:var(--surface-2); border-bottom:1px solid var(--rule); align-items:flex-end; }
+.people-add .f { display:flex; flex-direction:column; gap:4px; }
+.people-add label { font-size:.66rem; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); font-weight:600; }
+.people-add input { width:150px; }
+td .ident { font-family:"IBM Plex Mono",monospace; font-size:.75rem; }
+td .missing { color:var(--muted); font-style:italic; }
+.pill { font-family:"IBM Plex Mono",monospace; font-size:.63rem; text-transform:uppercase; letter-spacing:.06em; padding:2px 6px; border:1px solid var(--rule-firm); border-radius:var(--radius); color:var(--muted); margin-right:4px; white-space:nowrap; }
+.pill.role-owner { border-color:var(--ok); color:var(--ok); }
+.pill.role-finance { border-color:var(--review); color:var(--review); }
+
+.credit-hero { display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:1px; background:var(--rule); border-bottom:1px solid var(--rule); }
+.credit-hero > div { background:var(--surface); padding:14px; display:flex; flex-direction:column; gap:3px; }
+.credit-hero .k { font-size:.65rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+.credit-hero .v { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; font-size:1.7rem; font-weight:600; letter-spacing:-.03em; }
+.credit-hero .balance .v { color:var(--ok); }
+.credit-hero .low .v { color:var(--warn); }
+.credit-hero .note { font-size:.73rem; color:var(--muted); }
+tr.tier-best { background:var(--ok-bg); }
+td.n { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+td.r { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; text-align:right; color:var(--ok); font-weight:600; }
+.ledger .cl .amt-c { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; font-size:.78rem; }
+.ledger .plus { color:var(--ok); } .ledger .minus { color:var(--muted); }
+
+.chan { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:1px; background:var(--rule); }
+.chan > section { background:var(--surface); padding:14px; display:flex; flex-direction:column; gap:8px; }
+.chan h3 { margin:0; font-size:.7rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:600; }
+.chan .addr { font-family:"IBM Plex Mono",monospace; font-size:.86rem; color:var(--ink); word-break:break-all; }
+.chan p { margin:0; font-size:.8rem; color:var(--muted); }
+.chan .state { font-family:"IBM Plex Mono",monospace; font-size:.65rem; text-transform:uppercase; letter-spacing:.07em; align-self:flex-start; padding:2px 7px; border-radius:var(--radius); }
+.chan .live { background:var(--ok-bg); color:var(--ok); }
+.chan .notbuilt { background:var(--warn-bg); color:var(--warn); }
+pre.api { margin:0; background:var(--surface-2); border:1px solid var(--rule); border-radius:var(--radius); padding:13px; overflow-x:auto; font-family:"IBM Plex Mono",monospace; font-size:.75rem; line-height:1.6; color:var(--ink-2); }
+.keyrow { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+.keyrow code { font-family:"IBM Plex Mono",monospace; font-size:.8rem; background:var(--surface-2); border:1px solid var(--rule); border-radius:var(--radius); padding:4px 8px; }
+
+footer.note { font-size:.78rem; color:var(--muted); max-width:84ch; line-height:1.55; }
+footer.note strong { color:var(--ink-2); font-weight:600; }
+@media (prefers-reduced-motion: reduce){ *{transition:none!important;animation:none!important;} }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="brand">
+      <h1>Expenze</h1>
+      <p>expenze.ai &middot; receipts in by WhatsApp, email or API. The agent clears what policy allows and queues the rest for a named human.</p>
+    </div>
+    <div class="session">
+      <div class="avatar" id="avatar"></div>
+      <div class="idn">
+        <span class="nm" id="user-name"></span>
+        <span class="rl" id="user-role"></span>
+      </div>
+      <label>
+        <span class="as">Prototype &mdash; view as</span>
+        <select id="user-switch"></select>
+      </label>
+    </div>
+  </header>
+
+  <nav class="nav" id="nav"></nav>
+
+  <!-- ================= QUEUE VIEW ================= -->
+  <div id="view-queue" style="display:flex;flex-direction:column;gap:20px">
+
+    <section class="panel">
+      <header><h2>Intake</h2><span class="sub">today &middot; <span id="total-count"></span> receipts</span></header>
+      <div class="intake" id="intake"></div>
+    </section>
+
+    <section class="triage">
+      <div class="cleared"><span class="k">Cleared by agent</span><span class="v" id="t-cleared"></span><span class="note">Released with no human involved.</span></div>
+      <div class="queued"><span class="k">Awaiting a human</span><span class="v" id="t-queued"></span><span class="note" id="t-queued-note"></span></div>
+      <div><span class="k">Decided by you</span><span class="v" id="t-resolved"></span><span class="note" id="t-resolved-note">This session.</span></div>
+      <div class="rate"><span class="k">Auto-clear rate</span><span class="v" id="t-rate"></span><div class="bar"><i id="t-bar"></i></div><span class="note">The number this product lives or dies on.</span></div>
+    </section>
+
+    <div class="split">
+      <section class="panel">
+        <header><h2>Review queue</h2><span class="sub" id="queue-count"></span></header>
+        <div class="queue" id="queue"></div>
+      </section>
+
+      <section class="panel">
+        <div class="verdict">
+          <span class="badge" id="verdict-badge"></span>
+          <span class="chip" id="detail-who"></span>
+          <span class="route" id="detail-route"></span>
+        </div>
+        <div class="recon">
+          <div><span class="k">Receipt total</span><span class="v" id="r-total"></span></div>
+          <div class="disallowed"><span class="k">Disallowed</span><span class="v" id="r-disallowed"></span></div>
+          <div class="reimb"><span class="k">Reimbursable</span><span class="v" id="r-reimb"></span><span class="cap" id="r-cap"></span></div>
+        </div>
+        <div class="controls">
+          <div class="field"><label for="headcount">Covers</label><input type="number" id="headcount" min="0" max="40" step="1"></div>
+          <div class="field"><label for="src">Source</label><select id="src">
+            <option value="stated">stated</option><option value="inferred">inferred</option><option value="unknown">unknown</option>
+          </select></div>
+          <p class="hint" id="controls-hint"></p>
+        </div>
+        <div class="items-scroll">
+          <table><thead><tr>
+            <th scope="col">Line item</th><th scope="col">Category</th>
+            <th scope="col" style="text-align:right">Amount</th><th scope="col">Claim</th>
+          </tr></thead><tbody id="items"></tbody></table>
+        </div>
+        <div id="violations"></div>
+        <div class="actions" id="actions"></div>
+      </section>
+    </div>
+
+    <div class="split">
+      <section class="panel">
+        <header><h2>Receipt as received</h2><span class="sub" id="receipt-src"></span></header>
+        <div class="thermal" id="thermal"></div>
+      </section>
+      <section class="panel">
+        <header><h2>What the employee is told</h2><span class="sub">model prose</span></header>
+        <p class="rationale" id="rationale"></p>
+        <p class="attribution">Written by gpt-5.6-sol from the tool result. It quotes the figures; it cannot change them.</p>
+      </section>
+    </div>
+  </div>
+
+  <!-- ================= RULES VIEW ================= -->
+  <div id="view-rules" style="display:none;flex-direction:column;gap:20px">
+    <section class="panel">
+      <header>
+        <h2>Policy rules</h2>
+        <span class="sub" id="policy-version"></span>
+      </header>
+      <div class="banner" id="rules-banner"></div>
+      <div class="rules-grid">
+
+        <section>
+          <h3>Per-head meal cap</h3>
+          <p class="desc">Declared natively per currency. A receipt in a currency with no cap goes to review rather than through an invented exchange rate.</p>
+          <div id="caps"></div>
+          <div class="caprow">
+            <select id="add-ccy"></select>
+            <button class="btn" id="add-cap" type="button">Add currency</button>
+          </div>
+        </section>
+
+        <section>
+          <h3>Never reimbursable</h3>
+          <p class="desc">Excluded outright, whatever the amount or headcount. Removed from the bill before the cap is applied.</p>
+          <div class="toggles" id="excluded"></div>
+        </section>
+
+        <section>
+          <h3>Tax &amp; service charge on excluded items</h3>
+          <p class="desc">A bar bill with a separate tax line currently reimburses the tax on the alcohol. This is the fix.</p>
+          <label class="radio"><input type="radio" name="apportion" value="off">
+            <span>Claim in full<span class="sub3">Matches the engine today. Tax and service charge are always claimable.</span></span></label>
+          <label class="radio"><input type="radio" name="apportion" value="on">
+            <span>Apportion to the allowable share<span class="sub3">Splits tax and service charge by the ratio of allowable to total spend. Needs a matching change in <code>policy.py</code>.</span></span></label>
+        </section>
+
+        <section>
+          <h3>Agent autonomy</h3>
+          <p class="desc">Which verdicts the agent may release without a human. Everything else lands in the finance queue.</p>
+          <div class="toggles" id="autonomy"></div>
+          <p class="desc" id="autonomy-hint"></p>
+        </section>
+      </div>
+
+      <div class="impact" id="impact"></div>
+    </section>
+
+    <section class="panel">
+      <header><h2>Change history</h2><span class="sub">who changed what</span></header>
+      <div class="changelog" id="changelog"></div>
+    </section>
+  </div>
+
+  <!-- ================= STAFF ================= -->
+  <div id="view-mine" style="display:none;flex-direction:column;gap:20px">
+    <section class="panel">
+      <header><h2>My expenses</h2><span class="sub" id="mine-sub"></span></header>
+      <div class="banner" id="mine-banner"></div>
+      <div class="items-scroll">
+        <table><thead><tr>
+          <th scope="col">Vendor</th><th scope="col">Sent</th><th scope="col">Via</th>
+          <th scope="col" style="text-align:right">Claimed</th><th scope="col" style="text-align:right">Reimbursable</th>
+          <th scope="col">Status</th>
+        </tr></thead><tbody id="mine"></tbody></table>
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= PEOPLE ================= -->
+  <div id="view-people" style="display:none;flex-direction:column;gap:20px">
+    <section class="panel">
+      <header><h2>People</h2><span class="sub" id="people-count"></span></header>
+      <div class="banner" id="people-banner"></div>
+      <div class="people-add" id="people-add">
+        <div class="f"><label for="p-name">Name</label><input type="text" id="p-name" placeholder="Full name"></div>
+        <div class="f"><label for="p-staff">Staff ID</label><input type="text" id="p-staff" placeholder="M80-0000"></div>
+        <div class="f"><label for="p-email">Email</label><input type="text" id="p-email" placeholder="name@mobil80.com"></div>
+        <div class="f"><label for="p-mobile">Mobile</label><input type="text" id="p-mobile" placeholder="+91 ..."></div>
+        <button class="btn primary" type="button" id="p-add">Add person</button>
+      </div>
+      <div class="items-scroll">
+        <table><thead><tr>
+          <th scope="col">Name</th><th scope="col">Staff ID</th><th scope="col">Email</th>
+          <th scope="col">Mobile</th><th scope="col">Sends via</th><th scope="col" style="text-align:right">Receipts</th>
+        </tr></thead><tbody id="people"></tbody></table>
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= BILLING ================= -->
+  <div id="view-billing" style="display:none;flex-direction:column;gap:20px">
+    <section class="panel">
+      <header><h2>Credits</h2><span class="sub">1 credit per receipt submitted</span></header>
+      <div class="banner" id="billing-banner"></div>
+      <div class="credit-hero">
+        <div class="balance"><span class="k">Balance</span><span class="v" id="c-balance"></span><span class="note">Credits do not expire.</span></div>
+        <div><span class="k">Used this month</span><span class="v" id="c-used"></span><span class="note" id="c-rate-note"></span></div>
+        <div class="low"><span class="k">Runway</span><span class="v" id="c-runway"></span><span class="note">At the current daily rate.</span></div>
+        <div><span class="k">Cost per receipt</span><span class="v" id="c-unit"></span><span class="note">Blended, at your last purchase rate.</span></div>
+      </div>
+      <div class="items-scroll">
+        <table><thead><tr>
+          <th scope="col">Bundle</th><th scope="col" style="text-align:right">Credits</th>
+          <th scope="col" style="text-align:right">Price</th><th scope="col" style="text-align:right">Per receipt</th>
+          <th scope="col"></th>
+        </tr></thead><tbody id="tiers"></tbody></table>
+      </div>
+    </section>
+    <section class="panel">
+      <header><h2>Credit ledger</h2><span class="sub">purchases and consumption</span></header>
+      <div class="changelog ledger" id="ledger"></div>
+    </section>
+  </div>
+
+  <!-- ================= CHANNELS & API ================= -->
+  <div id="view-channels" style="display:none;flex-direction:column;gap:20px">
+    <section class="panel">
+      <header><h2>Channels &amp; API</h2><span class="sub" id="org-name"></span></header>
+      <div class="banner" id="chan-banner"></div>
+      <div class="chan">
+        <section>
+          <h3>WhatsApp</h3>
+          <span class="addr" id="ch-whatsapp"></span>
+          <span class="state notbuilt">connector not built</span>
+          <p>Staff photograph a receipt and send it to this number. Matched to a person by the mobile number they send from, so anyone without a mobile on file is unmatched.</p>
+        </section>
+        <section>
+          <h3>Email intake</h3>
+          <span class="addr" id="ch-email"></span>
+          <span class="state notbuilt">connector not built</span>
+          <p>Forward an invoice or booking confirmation. Matched by the sending address. Attachments and inline images are both read.</p>
+        </section>
+        <section>
+          <h3>REST API</h3>
+          <span class="addr">POST https://api.expenze.ai/v1/receipts</span>
+          <span class="state live">endpoint live (API Gateway)</span>
+          <p>Third-party systems submit on a person's behalf. Identify them by <code>staff_id</code>, <code>email</code> or <code>mobile</code>.</p>
+          <div class="keyrow"><code id="ch-key"></code><button class="btn" type="button" id="ch-rotate">Rotate key</button></div>
+        </section>
+        <section>
+          <h3>Example call</h3>
+          <pre class="api">curl -X POST https://api.expenze.ai/v1/receipts \
+  -H "Authorization: Bearer $EXPENZE_API_KEY" \
+  -d '{ "staff_id": "M80-4417",
+        "idempotency_key": "trip-8821-dinner",
+        "image_url": "https://.../receipt.jpg" }'</pre>
+          <p>A repeated <code>idempotency_key</code> returns the original result and never spends a second credit.</p>
+        </section>
+      </div>
+    </section>
+  </div>
+
+  <footer class="note">
+    <strong>Real:</strong> the policy engine is a port of <code>lambda_src/policy.py</code>, so every verdict, deduction, queue count and auto-clear rate recomputes live from the rules above.
+    <strong>Staged:</strong> extraction (line items are pre-filled, not read from the model), the WhatsApp and email connectors, credit purchase, and sign-in &mdash; identity here is a prototype switcher, not real auth. Only the REST endpoint is actually deployed. In production the three roles live in your IdP, and every decision writes the reviewer's ID to DynamoDB alongside the verdict.
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- rules (the Solution owner's surface) ---------- */
+
+const ALL_CATEGORIES = ["food","non_alcoholic_beverage","alcohol","tobacco","tax","service_charge","tip","other"];
+const PRORATA = new Set(["tax","service_charge","tip"]);
+const SYMBOL = { INR:"₹", USD:"$", SGD:"S$", AED:"AED ", EUR:"€", GBP:"£" };
+
+const rules = {
+  caps: { INR:150000, USD:1800 },          // minor units per head
+  excluded: new Set(["alcohol","tobacco"]),
+  apportion: false,
+  autoRelease: new Set(["approved","partially_approved"]),
+  version: 3
+};
+const baseline = JSON.parse(JSON.stringify({ caps:rules.caps }));
+baseline.excluded = [...rules.excluded];
+baseline.autoRelease = [...rules.autoRelease];
+baseline.apportion = rules.apportion;
+
+const changelog = [
+  { ver:"v3", by:"A. Fernandes", when:"02 Sep", what:"Added USD cap at $18.00/head for the Singapore and US travel policy." },
+  { ver:"v2", by:"A. Fernandes", when:"28 Aug", what:"Excluded tobacco alongside alcohol." },
+  { ver:"v1", by:"A. Fernandes", when:"21 Aug", what:"Created meals-per-head rule. INR cap ₹1,500.00/head, alcohol never reimbursable." }
+];
+
+/* ---------- policy engine: port of lambda_src/policy.py ---------- */
+
+const toMinor = (s) => Math.round(parseFloat(s) * 100);
+const fmt = (m,c) => (SYMBOL[c] || c+" ") + (m/100).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+function evaluatePolicy(currency, lineItems, attendeeCount) {
+  currency = (currency || "INR").toUpperCase();
+  const violations = [], decided = [];
+  let receiptTotal = 0, allowableDirect = 0, excludedDirect = 0, prorataTotal = 0, disallowed = 0;
+
+  lineItems.forEach((raw) => {
+    const amount = toMinor(raw.amount);
+    let category = raw.category;
+    receiptTotal += amount;
+    if (!ALL_CATEGORIES.includes(category)) {
+      violations.push({ code:"unrecognised_category", blocking:true, amount:null,
+        msg:`"${raw.description}" was categorised ${category}, which is not a policy category.` });
+      category = "other";
+    }
+    if (rules.excluded.has(category)) {
+      excludedDirect += amount; disallowed += amount;
+      violations.push({ code:"non_reimbursable_category", blocking:false, amount,
+        msg:`"${raw.description}" is ${category} and is never reimbursable.` });
+      decided.push({ ...raw, category, disposition:"excluded" });
+      return;
+    }
+    if (rules.apportion && PRORATA.has(category)) {
+      prorataTotal += amount;
+      decided.push({ ...raw, category, disposition:"prorata" });
+      return;
+    }
+    allowableDirect += amount;
+    decided.push({ ...raw, category, disposition:"claimable" });
+  });
+
+  // Tax and service charge follow the goods they were charged on.
+  let allowable = allowableDirect;
+  if (rules.apportion && prorataTotal > 0) {
+    const base = allowableDirect + excludedDirect;
+    const share = base > 0 ? allowableDirect / base : 1;
+    const claimable = Math.round(prorataTotal * share);
+    const dropped = prorataTotal - claimable;
+    allowable += claimable;
+    if (dropped > 0) {
+      disallowed += dropped;
+      violations.push({ code:"apportioned_to_excluded", blocking:false, amount:dropped,
+        msg:`Tax and service charge apportioned: ${Math.round((1-share)*100)}% of ${fmt(prorataTotal,currency)} follows the excluded items.` });
+    }
+  }
+
+  const capPerHead = rules.caps[currency];
+  if (capPerHead === undefined) {
+    violations.push({ code:"unsupported_currency", blocking:true, amount:null,
+      msg:`No per-head cap is defined for ${currency}. Refusing to apply an invented exchange rate.` });
+  }
+  if (attendeeCount === null || attendeeCount < 1) {
+    violations.push({ code:"attendee_count_unknown", blocking:true, amount:null,
+      msg:"A per-head cap cannot be applied without a headcount." });
+  }
+
+  let capTotal = null, reimbursable = allowable;
+  if (capPerHead !== undefined && attendeeCount !== null && attendeeCount >= 1) {
+    capTotal = capPerHead * attendeeCount;
+    if (allowable > capTotal) {
+      const excess = allowable - capTotal;
+      reimbursable = capTotal; disallowed += excess;
+      violations.push({ code:"meal_cap_exceeded", blocking:false, amount:excess,
+        msg:`Allowable spend ${fmt(allowable,currency)} exceeds the cap of ${fmt(capPerHead,currency)}/head × ${attendeeCount} = ${fmt(capTotal,currency)}.` });
+    }
+  }
+
+  const blocked = violations.some(v => v.blocking);
+  let verdict;
+  if (blocked) { verdict = "needs_review"; reimbursable = 0; }
+  else if (reimbursable === 0 && receiptTotal > 0) verdict = "rejected";
+  else if (reimbursable < receiptTotal) verdict = "partially_approved";
+  else verdict = "approved";
+
+  return { verdict, currency, receiptTotal, reimbursable, disallowed, capPerHead, capTotal, attendeeCount, violations, decided };
+}
+
+/* ---------- people ---------- */
+
+const USERS = [
+  { id:"u1", name:"Meera Iyer",      role:"Finance Executive", initials:"MI", tier:"finance" },
+  { id:"u2", name:"Arjun Fernandes", role:"Solution Owner",    initials:"AF", tier:"owner"   },
+  { id:"u3", name:"Priya Nair",      role:"Staff",             initials:"PN", tier:"staff"   }
+];
+let currentUser = USERS[0];
+const can = {
+  editRules:  () => currentUser.tier === "owner",
+  buyCredits: () => currentUser.tier === "owner",
+  editPeople: () => currentUser.tier === "owner" || currentUser.tier === "finance",
+  seeQueue:   () => currentUser.tier === "owner" || currentUser.tier === "finance"
+};
+
+const ORG = { name:"Mobil80 Technologies", rootEmail:"finance@mobil80.com",
+              whatsapp:"+65 8014 2277", intake:"receipts@mobil80.expenze.ai" };
+
+/* ---------- credits ---------- */
+const TIERS = [
+  { credits:1000, rupees:18000 }, { credits:2500, rupees:41250 }, { credits:5000, rupees:75000 },
+  { credits:10000, rupees:135000 }, { credits:25000, rupees:300000 }, { credits:50000, rupees:525000 },
+  { credits:100000, rupees:900000 }
+];
+const TIER_NAMES = ["Starter","Team","Growth","Business","Scale","Enterprise","Volume"];
+const credits = { balance:4821, purchased:25000, usedThisMonth:1179, perDay:38 };
+const ledger = [
+  { when:"today",   what:"Receipts audited (14)",             delta:-14 },
+  { when:"05 Sep",  what:"Receipts audited (41)",             delta:-41 },
+  { when:"01 Sep",  what:"Bulk purchase — Scale (25,000)",    delta:+25000 },
+  { when:"31 Aug",  what:"Receipts audited (37)",             delta:-37 }
+];
+
+/* ---------- people ---------- */
+const PEOPLE = [
+  { name:"Priya Nair",      staffId:"M80-4417", email:"priya@mobil80.com",  mobile:"+91 98450 11237", via:["whatsapp"],          n:23, role:null },
+  { name:"Riyad Rasheed",   staffId:"M80-0001", email:"riyad@mobil80.com",  mobile:"+91 98860 40012", via:["portal"],            n:8,  role:"owner" },
+  { name:"Arun Menon",      staffId:"M80-3312", email:"arun@mobil80.com",   mobile:"+91 99010 55471", via:["telegram"],          n:12, role:null },
+  { name:"Divya Shah",      staffId:"M80-2205", email:"divya@mobil80.com",  mobile:"",                via:["portal"],            n:19, role:null },
+  { name:"Karan Gupta",     staffId:"M80-5108", email:"",                   mobile:"+91 90080 33914", via:["whatsapp"],          n:31, role:null },
+  { name:"Sneha Rao",       staffId:"M80-1190", email:"sneha@mobil80.com",  mobile:"+91 97400 21883", via:["telegram"],          n:7,  role:null },
+  { name:"Meera Iyer",      staffId:"M80-0114", email:"meera@mobil80.com",  mobile:"+91 98801 77265", via:["portal"],            n:4,  role:"finance" },
+  { name:"Vikram Singh",    staffId:"M80-6621", email:"vikram@mobil80.com", mobile:"+91 99720 48810", via:["email"],             n:15, role:null },
+  { name:"Anita Desai",     staffId:"M80-4402", email:"anita@mobil80.com",  mobile:"+91 98200 61154", via:["concur"],            n:28, role:null },
+  { name:"Arjun Fernandes", staffId:"M80-0002", email:"arjun@mobil80.com",  mobile:"+91 98450 90021", via:["portal"],            n:2,  role:"owner" }
+];
+
+/* ---------- submissions ---------- */
+
+const CHANNELS = { portal:"Portal", whatsapp:"WhatsApp", telegram:"Telegram", email:"Email", concur:"Concur sync" };
+const li = (description, amount, category) => ({ description, amount, category });
+
+const SUBMISSIONS = [
+  { id:"s01", ch:"whatsapp", who:"Priya Nair", vendor:"The Bombay Canteen", age:"18m", currency:"INR", attendees:3, source:"stated",
+    raw:"THE BOMBAY CANTEEN\nLower Parel, Mumbai\n05-09-2026  20:41\nTable 12   Covers: 3\n\n2 x Kokum Kefir         360.00\n1 x Bombay Duck Fry     680.00\n1 x Mutton Kheema Pav   720.00\n1 x Ghee Roast Chicken  840.00\n2 x Sula Chenin Blanc  1400.00\n1 x Old Monk & Coke     420.00\n1 x Kulfi Falooda       320.00\n\nCGST 2.5%               118.50\nSGST 2.5%               118.50\nService Charge 10%      474.00\nTOTAL                  5451.00",
+    items:[li("Kokum Kefir ×2","360.00","non_alcoholic_beverage"),li("Bombay Duck Fry","680.00","food"),li("Mutton Kheema Pav","720.00","food"),li("Ghee Roast Chicken","840.00","food"),li("Sula Chenin Blanc ×2","1400.00","alcohol"),li("Old Monk & Coke","420.00","alcohol"),li("Kulfi Falooda","320.00","food"),li("CGST 2.5%","118.50","tax"),li("SGST 2.5%","118.50","tax"),li("Service Charge 10%","474.00","service_charge")],
+    rationale:"Your dinner at The Bombay Canteen is approved for ₹3,631.00 of the ₹5,451.00 billed. The two glasses of Sula Chenin Blanc and the Old Monk & Coke total ₹1,820.00 and are not reimbursable — alcohol is excluded regardless of amount. Everything else sits under the ₹4,500.00 cap for three covers." },
+
+  { id:"s02", ch:"portal", who:"Riyad Rasheed", vendor:"MTR 1924", age:"41m", currency:"INR", attendees:2, source:"stated",
+    raw:"MTR 1924\nLalbagh Road, Bengaluru\n06-09-2026\nCovers: 2\n\n2 x Rava Idli           360.00\n1 x Filter Coffee        90.00\n1 x Fresh Lime Soda     120.00\n\nCGST 2.5%                14.25\nSGST 2.5%                14.25\nTOTAL INR               598.50",
+    items:[li("Rava Idli ×2","360.00","food"),li("Filter Coffee","90.00","non_alcoholic_beverage"),li("Fresh Lime Soda","120.00","non_alcoholic_beverage"),li("CGST 2.5%","14.25","tax"),li("SGST 2.5%","14.25","tax")],
+    rationale:"Approved in full: ₹598.50 for two covers at MTR 1924. Nothing is excluded and the total is well under the ₹3,000.00 cap." },
+
+  { id:"s03", ch:"telegram", who:"Arun Menon", vendor:"Social Offline", age:"2h", currency:"INR", attendees:null, source:"unknown",
+    raw:"SOCIAL OFFLINE\nChurch Street, Bengaluru\n04-09-2026\n\nAssorted platters      3200.00\nSoft drinks             480.00\n\nTOTAL INR              3680.00",
+    items:[li("Assorted platters","3200.00","food"),li("Soft drinks","480.00","non_alcoholic_beverage")],
+    rationale:"This one needs a human. The receipt doesn't print a cover count, and a per-head cap can't be applied without knowing how many people the ₹3,680.00 covered." },
+
+  { id:"s04", ch:"portal", who:"Divya Shah", vendor:"Saigon Saigon", age:"3h", currency:"SGD", attendees:2, source:"stated",
+    raw:"SAIGON SAIGON\n21 Boat Quay, Singapore\n06-09-2026\nPax: 2\n\n2 x Pho Bo               28.00\n1 x Goi Cuon              9.50\n2 x Vietnamese Coffee     8.00\n\nGST 9%                    4.10\nTOTAL SGD                49.60",
+    items:[li("Pho Bo ×2","28.00","food"),li("Goi Cuon","9.50","food"),li("Vietnamese Coffee ×2","8.00","non_alcoholic_beverage"),li("GST 9%","4.10","tax")],
+    rationale:"Held for review. Caps are defined in INR and USD only, and this bill is in Singapore dollars — rather than convert at a rate nobody has agreed, it goes to a reviewer." },
+
+  { id:"s05", ch:"whatsapp", who:"Karan Gupta", vendor:"Chai Point", age:"22m", currency:"INR", attendees:1, source:"stated",
+    raw:"CHAI POINT\nIndiranagar, Bengaluru\n06-09-2026\nCovers: 1\n\n2 x Masala Chai          90.00\n1 x Veg Puff             60.00\nCGST 2.5%                 3.75\nSGST 2.5%                 3.75\nTOTAL INR               157.50",
+    items:[li("Masala Chai ×2","90.00","non_alcoholic_beverage"),li("Veg Puff","60.00","food"),li("CGST 2.5%","3.75","tax"),li("SGST 2.5%","3.75","tax")],
+    rationale:"Approved in full: ₹157.50, comfortably inside the ₹1,500.00 single-cover cap." },
+
+  { id:"s06", ch:"telegram", who:"Sneha Rao", vendor:"Toit Brewpub", age:"1h", currency:"INR", attendees:4, source:"stated",
+    raw:"TOIT BREWPUB\n100 Feet Road, Indiranagar\n05-09-2026\nCovers: 4\n\n4 x Tintin Pilsner     1520.00\n1 x Basil Chicken Wings 620.00\n1 x Margherita Pizza    540.00\n1 x Nachos              480.00\nCGST 2.5%                79.00\nSGST 2.5%                79.00\nService Charge          316.00\nTOTAL INR              3634.00",
+    items:[li("Tintin Pilsner ×4","1520.00","alcohol"),li("Basil Chicken Wings","620.00","food"),li("Margherita Pizza","540.00","food"),li("Nachos","480.00","food"),li("CGST 2.5%","79.00","tax"),li("SGST 2.5%","79.00","tax"),li("Service Charge","316.00","service_charge")],
+    rationale:"Approved for ₹2,114.00 of ₹3,634.00. The four Tintin Pilsners (₹1,520.00) are alcohol and not reimbursable. The rest is within the ₹6,000.00 cap for four covers." },
+
+  { id:"s07", ch:"portal", who:"Meera Iyer", vendor:"Third Wave Coffee", age:"55m", currency:"INR", attendees:2, source:"stated",
+    raw:"THIRD WAVE COFFEE\nKoramangala, Bengaluru\n06-09-2026\nCovers: 2\n\n2 x Cold Brew           420.00\n1 x Croissant           180.00\nCGST 2.5%                15.00\nSGST 2.5%                15.00\nTOTAL INR               630.00",
+    items:[li("Cold Brew ×2","420.00","non_alcoholic_beverage"),li("Croissant","180.00","food"),li("CGST 2.5%","15.00","tax"),li("SGST 2.5%","15.00","tax")],
+    rationale:"Approved in full: ₹630.00 for two covers, well under the ₹3,000.00 cap." },
+
+  { id:"s08", ch:"email", who:"Vikram Singh", vendor:"Barbeque Nation", age:"4h", currency:"INR", attendees:6, source:"stated",
+    raw:"BARBEQUE NATION\nJP Nagar, Bengaluru\n05-09-2026\nCovers: 6\n\n6 x Buffet             5400.00\n6 x Soft drinks         720.00\nCGST 2.5%               153.00\nSGST 2.5%               153.00\nTOTAL INR              6426.00",
+    items:[li("Buffet ×6","5400.00","food"),li("Soft drinks ×6","720.00","non_alcoholic_beverage"),li("CGST 2.5%","153.00","tax"),li("SGST 2.5%","153.00","tax")],
+    rationale:"Approved in full: ₹6,426.00 for a team lunch of six, under the ₹9,000.00 cap. No alcohol on the bill." },
+
+  { id:"s09", ch:"concur", who:"Anita Desai", vendor:"Smoke House Deli", age:"6h", currency:"INR", attendees:2, source:"stated",
+    raw:"SMOKE HOUSE DELI\nChurchgate, Mumbai\n04-09-2026\nCovers: 2\n\n1 x Truffle Pasta      1450.00\n1 x Lamb Burger        1200.00\n2 x Iced Tea            420.00\n1 x Dessert             560.00\nCGST 2.5%                90.75\nSGST 2.5%                90.75\nService Charge 10%      363.00\nTOTAL INR              4174.50",
+    items:[li("Truffle Pasta","1450.00","food"),li("Lamb Burger","1200.00","food"),li("Iced Tea ×2","420.00","non_alcoholic_beverage"),li("Dessert","560.00","food"),li("CGST 2.5%","90.75","tax"),li("SGST 2.5%","90.75","tax"),li("Service Charge 10%","363.00","service_charge")],
+    rationale:"Approved for ₹3,000.00 of ₹4,174.50. There is no alcohol here — the reduction is the per-head cap: two covers allows ₹3,000.00 and the bill ran ₹1,174.50 over." },
+
+  { id:"s10", ch:"whatsapp", who:"Rahul Verma", vendor:"Blue Tokai", age:"12m", currency:"INR", attendees:1, source:"stated",
+    raw:"BLUE TOKAI COFFEE\nHSR Layout, Bengaluru\n06-09-2026\nCovers: 1\n\n1 x Filter Coffee       250.00\n1 x Banana Bread        220.00\nCGST 2.5%                11.75\nSGST 2.5%                11.75\nTOTAL INR               493.50",
+    items:[li("Filter Coffee","250.00","non_alcoholic_beverage"),li("Banana Bread","220.00","food"),li("CGST 2.5%","11.75","tax"),li("SGST 2.5%","11.75","tax")],
+    rationale:"Approved in full: ₹493.50, inside the ₹1,500.00 single-cover cap." },
+
+  { id:"s11", ch:"portal", who:"Nikhil Joshi", vendor:"The Fatty Bao", age:"5h", currency:"INR", attendees:null, source:"unknown",
+    raw:"THE FATTY BAO\nIndiranagar, Bengaluru\n05-09-2026\n\nBao Platter            1680.00\nRamen                   890.00\nCGST 2.5%                64.25\nSGST 2.5%                64.25\nTOTAL INR              2698.50",
+    items:[li("Bao Platter","1680.00","food"),li("Ramen","890.00","food"),li("CGST 2.5%","64.25","tax"),li("SGST 2.5%","64.25","tax")],
+    rationale:"Needs a headcount. The receipt has no cover count, so the per-head cap can't be applied to the ₹2,698.50 total." },
+
+  { id:"s12", ch:"telegram", who:"Tanya Kapoor", vendor:"Hard Rock Cafe", age:"7h", currency:"INR", attendees:2, source:"stated",
+    raw:"HARD ROCK CAFE\nSt Marks Road, Bengaluru\n04-09-2026\nCovers: 2\n(all prices inclusive of taxes)\n\n2 x Long Island Iced Tea 1300.00\n2 x Craft Beer            900.00\n\nTOTAL INR                2200.00",
+    items:[li("Long Island Iced Tea ×2","1300.00","alcohol"),li("Craft Beer ×2","900.00","alcohol")],
+    rationale:"This claim cannot be reimbursed. Every line is alcohol — ₹2,200.00 in total — and alcohol is excluded outright. If food was ordered and is missing, submit the itemised bill." },
+
+  { id:"s13", ch:"whatsapp", who:"Sanjay Pillai", vendor:"Empire Restaurant", age:"33m", currency:"INR", attendees:3, source:"stated",
+    raw:"EMPIRE RESTAURANT\nKoramangala, Bengaluru\n06-09-2026\nCovers: 3\n\n3 x Chicken Biryani    1050.00\n2 x Butter Naan         120.00\n3 x Lassi               270.00\nCGST 2.5%                36.00\nSGST 2.5%                36.00\nTOTAL INR              1512.00",
+    items:[li("Chicken Biryani ×3","1050.00","food"),li("Butter Naan ×2","120.00","food"),li("Lassi ×3","270.00","non_alcoholic_beverage"),li("CGST 2.5%","36.00","tax"),li("SGST 2.5%","36.00","tax")],
+    rationale:"Approved in full: ₹1,512.00 for three covers, well under the ₹4,500.00 cap." },
+
+  { id:"s14", ch:"email", who:"Farah Khan", vendor:"Cafe Noir", age:"8h", currency:"AED", attendees:2, source:"stated",
+    raw:"CAFE NOIR\nDIFC, Dubai\n03-09-2026\nCovers: 2\n\n2 x Breakfast            96.00\n2 x Coffee               34.00\nVAT 5%                    6.50\nTOTAL AED               136.50",
+    items:[li("Breakfast ×2","96.00","food"),li("Coffee ×2","34.00","non_alcoholic_beverage"),li("VAT 5%","6.50","tax")],
+    rationale:"Held for review. This bill is in UAE dirhams and the policy prices caps only in INR and USD. Converting at an unapproved rate would be a guess, so a reviewer decides." }
+];
+
+/* ---------- state ---------- */
+
+const VERDICT_LABEL = { approved:"Approved", partially_approved:"Partially approved", rejected:"Rejected", needs_review:"Needs review" };
+const AUTONOMY_ORDER = ["approved","partially_approved","rejected","needs_review"];
+const edits = {};
+const decisions = {};     // id -> { action, by, at }
+let selectedId = null, view = "queue";
+
+const $ = (id) => document.getElementById(id);
+const nowStamp = () => new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+
+function workingCopy(sub) {
+  if (!edits[sub.id]) edits[sub.id] = { attendees:sub.attendees, source:sub.source, items:sub.items.map(i=>({...i})) };
+  return edits[sub.id];
+}
+const evaluate = (sub) => { const w = workingCopy(sub); return evaluatePolicy(sub.currency, w.items, w.attendees); };
+const isPristine = (sub,w) => w.attendees===sub.attendees && w.source===sub.source && w.items.every((it,i)=>it.category===sub.items[i].category);
+const isQueued = (sub) => !decisions[sub.id] && !rules.autoRelease.has(evaluate(sub).verdict);
+
+/* ---------- identity ---------- */
+
+function renderSession() {
+  $("avatar").textContent = currentUser.initials;
+  $("user-name").textContent = currentUser.name;
+  $("user-role").textContent = currentUser.role;
+  const sel = $("user-switch");
+  if (!sel.options.length) {
+    USERS.forEach(u => { const o = document.createElement("option"); o.value = u.id; o.textContent = `${u.name} — ${u.role}`; sel.appendChild(o); });
+    sel.addEventListener("change", e => { currentUser = USERS.find(u=>u.id===e.target.value); renderAll(); });
+  }
+  sel.value = currentUser.id;
+}
+
+function renderNav() {
+  const nav = $("nav"); nav.textContent = "";
+  const admin = currentUser.tier !== "staff";
+  const TABS = [
+    ["mine","My expenses",       () => currentUser.tier === "staff"],
+    ["queue","Review queue",     () => admin],
+    ["people","People",          () => admin],
+    ["rules","Policy rules",     () => admin],
+    ["billing","Credits",        () => admin],
+    ["channels","Channels & API",() => admin]
+  ].filter(([,,vis]) => vis());
+
+  if (!TABS.some(([id]) => id === view)) view = TABS[0][0];
+
+  TABS.forEach(([id,label]) => {
+    const b = document.createElement("button"); b.type = "button";
+    b.setAttribute("aria-current", String(view===id));
+    b.textContent = label;
+    const ro = (id === "rules" && !can.editRules())
+            || (id === "billing" && !can.buyCredits())
+            || (id === "channels" && !can.editRules());
+    if (ro) { const l = document.createElement("span"); l.className="lock"; l.textContent="read-only"; b.appendChild(l); }
+    b.addEventListener("click", () => { view = id; renderAll(); });
+    nav.appendChild(b);
+  });
+  ["mine","queue","people","rules","billing","channels"].forEach(v => {
+    const el = $("view-"+v); if (el) el.style.display = view === v ? "flex" : "none";
+  });
+}
+
+/* ---------- queue view ---------- */
+
+function renderIntake() {
+  const box = $("intake"); box.textContent = "";
+  $("total-count").textContent = SUBMISSIONS.length;
+  Object.entries(CHANNELS).forEach(([key,label]) => {
+    const subs = SUBMISSIONS.filter(s=>s.ch===key);
+    const q = subs.filter(isQueued).length;
+    const d = document.createElement("div");
+    d.innerHTML = `<span class="ch">${label}</span><span class="n">${subs.length}</span><span class="sub2">${q ? q+" awaiting review" : "all cleared"}</span>`;
+    box.appendChild(d);
+  });
+}
+
+function renderTriage() {
+  const queued = SUBMISSIONS.filter(isQueued).length;
+  const mine = Object.values(decisions).filter(d=>d.by===currentUser.name).length;
+  const decided = Object.keys(decisions).length;
+  const cleared = SUBMISSIONS.length - queued - decided;
+  const rate = Math.round(cleared/SUBMISSIONS.length*100);
+  $("t-cleared").textContent = cleared;
+  $("t-queued").textContent = queued;
+  $("t-resolved").textContent = mine;
+  $("t-resolved-note").textContent = decided > mine ? `${decided} total, ${decided-mine} by others.` : "This session.";
+  $("t-rate").textContent = rate + "%";
+  $("t-bar").style.width = rate + "%";
+  $("t-queued-note").textContent = queued === 0 ? "Queue is clear." : "Blocked on a judgment the rules can't make.";
+}
+
+function renderQueue() {
+  const box = $("queue"); box.textContent = "";
+  const queue = SUBMISSIONS.filter(isQueued);
+  $("queue-count").textContent = queue.length === 0 ? "clear" : queue.length + " waiting";
+  if (!queue.length) {
+    const p = document.createElement("p"); p.className = "queue-empty";
+    p.textContent = "Nothing waiting. Every receipt today cleared policy on its own.";
+    box.appendChild(p); return;
+  }
+  queue.forEach(sub => {
+    const res = evaluate(sub);
+    const blocking = res.violations.find(v=>v.blocking) || res.violations[0];
+    const b = document.createElement("button");
+    b.className = "qrow"; b.type = "button";
+    b.setAttribute("aria-current", String(sub.id === selectedId));
+    b.innerHTML = `<span class="top"><span class="vendor">${sub.vendor}</span><span class="who">${sub.who}</span></span>` +
+      `<span class="amt">${fmt(res.receiptTotal,res.currency)}</span>` +
+      `<span class="why">${blocking ? blocking.code : res.verdict}</span>` +
+      `<span class="meta"><span class="src">${CHANNELS[sub.ch]}</span><span class="age">${sub.age} ago</span></span>`;
+    b.addEventListener("click", () => { selectedId = sub.id; renderAll(); });
+    box.appendChild(b);
+  });
+}
+
+function renderDetail() {
+  const sub = SUBMISSIONS.find(s=>s.id===selectedId) || SUBMISSIONS[0];
+  selectedId = sub.id;
+  const w = workingCopy(sub), res = evaluate(sub), ccy = res.currency;
+  const decision = decisions[sub.id];
+
+  const badge = $("verdict-badge");
+  badge.textContent = VERDICT_LABEL[res.verdict];
+  badge.className = "badge v-" + res.verdict;
+  $("detail-who").textContent = `${sub.who} · ${sub.vendor}`;
+  $("detail-route").textContent = decision
+    ? `${decision.action} by ${decision.by} · ${decision.at}`
+    : (rules.autoRelease.has(res.verdict) ? "released by agent" : "queued for human review");
+  $("receipt-src").textContent = `via ${CHANNELS[sub.ch]} · ${sub.age} ago`;
+  $("thermal").textContent = sub.raw;
+
+  $("r-total").textContent = fmt(res.receiptTotal, ccy);
+  const dis = $("r-disallowed");
+  dis.textContent = fmt(res.disallowed, ccy);
+  dis.classList.toggle("nonzero", res.disallowed > 0);
+  $("r-reimb").textContent = fmt(res.reimbursable, ccy);
+  $("r-cap").textContent = res.capTotal !== null
+    ? `cap ${fmt(res.capPerHead,ccy)} × ${res.attendeeCount} = ${fmt(res.capTotal,ccy)}`
+    : (rules.caps[ccy] === undefined ? `no cap defined for ${ccy}` : "cap not applicable — headcount unknown");
+
+  $("headcount").value = w.attendees === null ? "" : w.attendees;
+  $("src").value = w.source;
+  const locked = !!decision;
+  $("headcount").disabled = locked; $("src").disabled = locked;
+  $("controls-hint").textContent = locked
+    ? "Decided — reopen it to make further changes."
+    : "Fix what blocked it; the verdict recomputes against the same rules production runs.";
+
+  const tbody = $("items"); tbody.textContent = "";
+  w.items.forEach((item, idx) => {
+    const d = res.decided[idx];
+    const tr = document.createElement("tr");
+    if (d.disposition === "excluded") tr.className = "excluded";
+    if (d.disposition === "prorata") tr.className = "prorata";
+
+    const td1 = document.createElement("td"); td1.className="desc"; td1.textContent = item.description;
+    const td2 = document.createElement("td");
+    const sel = document.createElement("select");
+    sel.setAttribute("aria-label","Category for "+item.description);
+    sel.disabled = locked;
+    ALL_CATEGORIES.forEach(c => { const o=document.createElement("option"); o.value=c; o.textContent=c; if(c===item.category) o.selected=true; sel.appendChild(o); });
+    sel.addEventListener("change", e => { w.items[idx].category = e.target.value; renderAll(); });
+    td2.appendChild(sel);
+    const td3 = document.createElement("td"); td3.className="amt"; td3.textContent = fmt(toMinor(item.amount), ccy);
+    const td4 = document.createElement("td"); td4.className="disp";
+    td4.innerHTML = d.disposition === "excluded" ? '<span class="no">&#10007; excluded</span>'
+      : d.disposition === "prorata" ? 'apportioned'
+      : '<span class="yes">&#10003; claimable</span>';
+    tr.append(td1,td2,td3,td4); tbody.appendChild(tr);
+  });
+
+  const vbox = $("violations"); vbox.textContent = "";
+  if (!res.violations.length) {
+    const p = document.createElement("p"); p.className="empty";
+    p.textContent = "No findings. The claim passed every rule in the active policy.";
+    vbox.appendChild(p);
+  } else res.violations.forEach(v => {
+    const row = document.createElement("div");
+    row.className = "violation " + (v.blocking ? "blocking" : "deduct");
+    const code = document.createElement("code"); code.textContent = v.code;
+    const msg = document.createElement("span"); msg.className="msg"; msg.textContent = v.msg;
+    const amt = document.createElement("span"); amt.className="amt"; amt.textContent = v.amount !== null ? "−"+fmt(v.amount,ccy) : "";
+    row.append(code,msg,amt); vbox.appendChild(row);
+  });
+
+  const abox = $("actions"); abox.textContent = "";
+  if (decision) {
+    const s = document.createElement("span"); s.className="stamp";
+    s.textContent = `✓ ${decision.action} by ${decision.by} (${decision.role}) at ${decision.at}`;
+    const undo = document.createElement("button");
+    undo.className="btn"; undo.type="button"; undo.textContent="Reopen";
+    undo.addEventListener("click", () => { delete decisions[sub.id]; renderAll(); });
+    abox.append(s, undo);
+  } else if (rules.autoRelease.has(res.verdict)) {
+    const s = document.createElement("span"); s.className="stamp";
+    s.textContent = isPristine(sub,w)
+      ? "Released by the agent — no human action required."
+      : `↻ ${currentUser.name}'s correction cleared the block — it now passes policy and releases on its own.`;
+    abox.appendChild(s);
+  } else {
+    [["Approve as reviewed","primary","Approved"],["Reject","danger","Rejected"],["Ask employee","","Query sent"]].forEach(([label,cls,action]) => {
+      const b = document.createElement("button");
+      b.className = "btn" + (cls?" "+cls:""); b.type="button"; b.textContent = label;
+      b.addEventListener("click", () => {
+        decisions[sub.id] = { action, by:currentUser.name, role:currentUser.role, at:nowStamp() };
+        renderAll();
+      });
+      abox.appendChild(b);
+    });
+    const s = document.createElement("span"); s.className="stamp pending";
+    s.textContent = `Deciding as ${currentUser.name} · ${currentUser.role}`;
+    abox.appendChild(s);
+  }
+
+  $("rationale").textContent = isPristine(sub,w) ? sub.rationale
+    : "— Edited. The figures above are recomputed live by the policy engine; the model's written explanation is only regenerated on a real submission.";
+}
+
+/* ---------- rules view ---------- */
+
+function bump(what) {
+  rules.version += 1;
+  changelog.unshift({ ver:"v"+rules.version, by:currentUser.name, when:"just now", what });
+}
+
+function renderRules() {
+  const ro = !can.editRules();
+  $("policy-version").textContent = `meals-per-head-v${rules.version}`;
+
+  const banner = $("rules-banner");
+  banner.textContent = "";
+  banner.innerHTML = ro
+    ? `<strong>Read-only.</strong><span>Editing policy requires the Solution owner role. You are signed in as ${currentUser.name} (${currentUser.role}).</span>`
+    : `<strong>Editing as ${currentUser.name}.</strong><span>Changes apply to receipts submitted from now on. Claims already decided keep the policy version they were judged under.</span>`;
+
+  // caps
+  const caps = $("caps"); caps.textContent = "";
+  Object.entries(rules.caps).forEach(([ccy, minor]) => {
+    const row = document.createElement("div"); row.className = "caprow";
+    const c = document.createElement("span"); c.className="ccy"; c.textContent = ccy;
+    const inp = document.createElement("input");
+    inp.type="number"; inp.step="1"; inp.min="0"; inp.value = (minor/100).toFixed(0);
+    inp.style.width="86px"; inp.disabled = ro;
+    inp.setAttribute("aria-label", ccy + " per-head cap");
+    inp.addEventListener("change", e => {
+      const v = Math.max(0, Math.round(parseFloat(e.target.value||"0")))*100;
+      rules.caps[ccy] = v; bump(`${ccy} per-head cap set to ${fmt(v,ccy)}.`); renderAll();
+    });
+    const per = document.createElement("span"); per.className="per"; per.textContent = "per head";
+    row.append(c, inp, per);
+    if (!ro && Object.keys(rules.caps).length > 1) {
+      const rm = document.createElement("button");
+      rm.className="rm"; rm.type="button"; rm.textContent="remove";
+      rm.addEventListener("click", () => { delete rules.caps[ccy]; bump(`${ccy} cap removed — claims in ${ccy} now go to review.`); renderAll(); });
+      row.appendChild(rm);
+    }
+    caps.appendChild(row);
+  });
+
+  const add = $("add-ccy"); add.textContent = "";
+  const seen = new Set(SUBMISSIONS.map(s=>s.currency));
+  ["SGD","AED","EUR","GBP"].filter(c=>!(c in rules.caps)).forEach(c => {
+    const o = document.createElement("option"); o.value=c;
+    o.textContent = c + (seen.has(c) ? " (in queue today)" : "");
+    add.appendChild(o);
+  });
+  add.disabled = ro || !add.options.length;
+  $("add-cap").disabled = ro || !add.options.length;
+  $("add-cap").onclick = () => {
+    const c = add.value; if (!c) return;
+    rules.caps[c] = 2500;
+    bump(`${c} cap added at ${fmt(2500,c)}/head.`); renderAll();
+  };
+
+  // excluded categories
+  const ex = $("excluded"); ex.textContent = "";
+  ALL_CATEGORIES.filter(c => c !== "other").forEach(c => {
+    const on = rules.excluded.has(c);
+    const l = document.createElement("label");
+    l.className = "toggle" + (on?" on":"") + (ro?" ro":"");
+    const cb = document.createElement("input"); cb.type="checkbox"; cb.checked=on; cb.disabled=ro;
+    cb.addEventListener("change", () => {
+      cb.checked ? rules.excluded.add(c) : rules.excluded.delete(c);
+      bump(`${c} ${cb.checked?"excluded from":"made eligible for"} reimbursement.`); renderAll();
+    });
+    l.append(cb, document.createTextNode(c)); ex.appendChild(l);
+  });
+
+  // apportionment
+  document.querySelectorAll('input[name="apportion"]').forEach(r => {
+    r.checked = (r.value === "on") === rules.apportion;
+    r.disabled = ro;
+    r.onchange = () => {
+      rules.apportion = r.value === "on";
+      bump(`Tax and service charge on excluded items: ${rules.apportion?"apportioned":"claimed in full"}.`);
+      renderAll();
+    };
+  });
+
+  // autonomy
+  const au = $("autonomy"); au.textContent = "";
+  AUTONOMY_ORDER.forEach(v => {
+    const locked = v === "needs_review";
+    const on = rules.autoRelease.has(v);
+    const l = document.createElement("label");
+    l.className = "toggle" + (on?" on":"") + (locked||ro ? " locked" : "");
+    const cb = document.createElement("input"); cb.type="checkbox"; cb.checked=on; cb.disabled = locked || ro;
+    cb.addEventListener("change", () => {
+      cb.checked ? rules.autoRelease.add(v) : rules.autoRelease.delete(v);
+      bump(`Agent ${cb.checked?"may now":"may no longer"} release ${v} without a human.`); renderAll();
+    });
+    l.append(cb, document.createTextNode(v)); au.appendChild(l);
+  });
+  $("autonomy-hint").textContent = rules.autoRelease.has("rejected")
+    ? "Rejections are being issued with no human involved. That denies someone money on the agent's say-so."
+    : "needs_review can never be auto-released; that is what the state means.";
+
+  // live impact
+  const queued = SUBMISSIONS.filter(isQueued).length;
+  const decided = Object.keys(decisions).length;
+  const cleared = SUBMISSIONS.length - queued - decided;
+  const rate = Math.round(cleared/SUBMISSIONS.length*100);
+
+  const baseRules = { caps:baseline.caps, excluded:new Set(baseline.excluded), apportion:baseline.apportion, autoRelease:new Set(baseline.autoRelease) };
+  const saved = Object.assign({}, rules);
+  Object.assign(rules, baseRules);
+  const baseCleared = SUBMISSIONS.filter(s => rules.autoRelease.has(evaluatePolicy(s.currency, s.items, s.attendees).verdict)).length;
+  Object.assign(rules, saved);
+  const baseRate = Math.round(baseCleared/SUBMISSIONS.length*100);
+  const delta = rate - baseRate;
+
+  const imp = $("impact"); imp.textContent = "";
+  [["Auto-clear rate now", rate+"%", delta===0 ? "unchanged from v3" : (delta>0?"+":"")+delta+" pts vs v3", delta>0?"up":delta<0?"down":""],
+   ["Would reach the queue", String(queued), queued===1?"receipt":"receipts", ""],
+   ["Policy version", "v"+rules.version, changelog[0].when === "just now" ? "unsaved changes" : "no changes", ""]
+  ].forEach(([k,v,d,cls]) => {
+    const div = document.createElement("div");
+    div.innerHTML = `<span class="k">${k}</span><span class="v">${v}</span><span class="delta ${cls}">${d}</span>`;
+    imp.appendChild(div);
+  });
+
+  const cl = $("changelog"); cl.textContent = "";
+  changelog.slice(0,8).forEach(c => {
+    const row = document.createElement("div"); row.className="cl";
+    row.innerHTML = `<span class="ver">${c.ver}</span><span class="what">${c.what}</span><span class="by">${c.by} · ${c.when}</span>`;
+    cl.appendChild(row);
+  });
+}
+
+/* ---------- people ---------- */
+
+function renderPeople() {
+  const rw = can.editPeople();
+  $("people-count").textContent = PEOPLE.length + " on file";
+  $("people-banner").innerHTML = rw
+    ? `<strong>Editing as ${currentUser.name}.</strong><span>A person is matched on any identifier they have. Someone with no mobile cannot be matched from WhatsApp; someone with no email cannot be matched from a forwarded message.</span>`
+    : `<strong>Read-only.</strong><span>Managing people requires the Finance Executive or Solution Owner role.</span>`;
+  $("people-add").style.display = rw ? "flex" : "none";
+
+  const tb = $("people"); tb.textContent = "";
+  PEOPLE.forEach(person => {
+    const tr = document.createElement("tr");
+    const ident = (v, what) => v ? `<span class="ident">${v}</span>`
+                                 : `<span class="ident missing">no ${what}</span>`;
+    const rolePill = person.role === "owner"   ? '<span class="pill role-owner">owner</span>'
+                   : person.role === "finance" ? '<span class="pill role-finance">finance</span>' : "";
+    tr.innerHTML = `<td>${rolePill}${person.name}</td>` +
+      `<td>${ident(person.staffId,"id")}</td>` +
+      `<td>${ident(person.email,"email")}</td>` +
+      `<td>${ident(person.mobile,"mobile")}</td>` +
+      `<td>${person.via.map(v => `<span class="pill">${CHANNELS[v]||v}</span>`).join("")}</td>` +
+      `<td class="n">${person.n}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+/* ---------- billing ---------- */
+
+const inr = (n) => "₹" + n.toLocaleString("en-IN");
+
+function renderBilling() {
+  const rw = can.buyCredits();
+  $("billing-banner").innerHTML = rw
+    ? `<strong>Buying as ${currentUser.name}.</strong><span>Credits are consumed one per receipt, whether it clears automatically or goes to the queue. Prices below are placeholders pending a commercial decision.</span>`
+    : `<strong>Read-only.</strong><span>Purchasing credits requires the Solution Owner role. You can see the balance and the burn.</span>`;
+
+  const runway = Math.floor(credits.balance / credits.perDay);
+  $("c-balance").textContent = credits.balance.toLocaleString("en-IN");
+  $("c-used").textContent = credits.usedThisMonth.toLocaleString("en-IN");
+  $("c-rate-note").textContent = `About ${credits.perDay} receipts a day.`;
+  $("c-runway").textContent = runway + "d";
+  const lastRate = 300000 / 25000;
+  $("c-unit").textContent = "₹" + lastRate.toFixed(2);
+
+  const tb = $("tiers"); tb.textContent = "";
+  TIERS.forEach((t, i) => {
+    const r = t.rupees / t.credits;
+    const tr = document.createElement("tr");
+    if (i === TIERS.length - 1) tr.className = "tier-best";
+    const btn = rw ? `<button class="btn" type="button" data-tier="${i}">Buy</button>`
+                   : `<span class="pill">owner only</span>`;
+    tr.innerHTML = `<td>${TIER_NAMES[i]}</td><td class="n">${t.credits.toLocaleString("en-IN")}</td>` +
+      `<td class="n">${inr(t.rupees)}</td><td class="r">₹${r.toFixed(2)}</td><td>${btn}</td>`;
+    tb.appendChild(tr);
+  });
+  tb.querySelectorAll("button[data-tier]").forEach(b => {
+    b.addEventListener("click", () => {
+      const t = TIERS[+b.dataset.tier];
+      credits.balance += t.credits;
+      ledger.unshift({ when:"just now", what:`Bulk purchase — ${TIER_NAMES[+b.dataset.tier]} (${t.credits.toLocaleString("en-IN")}) by ${currentUser.name}`, delta:+t.credits });
+      renderAll();
+    });
+  });
+
+  const lg = $("ledger"); lg.textContent = "";
+  ledger.slice(0,8).forEach(e => {
+    const row = document.createElement("div"); row.className = "cl";
+    const cls = e.delta > 0 ? "plus" : "minus";
+    row.innerHTML = `<span class="ver">${e.when}</span><span class="what">${e.what}</span>` +
+      `<span class="amt-c ${cls}">${e.delta > 0 ? "+" : ""}${e.delta.toLocaleString("en-IN")}</span>`;
+    lg.appendChild(row);
+  });
+}
+
+/* ---------- channels ---------- */
+
+let apiKeyTail = "4f21";
+function renderChannels() {
+  const rw = can.editRules();
+  $("org-name").textContent = ORG.name;
+  $("chan-banner").innerHTML = rw
+    ? `<strong>Editing as ${currentUser.name}.</strong><span>Every route lands on the same audit, so a verdict never depends on how the receipt arrived.</span>`
+    : `<strong>Read-only.</strong><span>Changing channel settings or rotating keys requires the Solution Owner role.</span>`;
+  $("ch-whatsapp").textContent = ORG.whatsapp;
+  $("ch-email").textContent = ORG.intake;
+  $("ch-key").textContent = "exp_live_" + "•".repeat(20) + apiKeyTail;
+  const rot = $("ch-rotate");
+  rot.disabled = !rw;
+  rot.onclick = () => {
+    apiKeyTail = Math.random().toString(16).slice(2,6);
+    renderChannels();
+  };
+}
+
+/* ---------- staff ---------- */
+
+function renderMine() {
+  const mine = SUBMISSIONS.filter(s => s.who === currentUser.name);
+  $("mine-sub").textContent = mine.length + (mine.length === 1 ? " submission" : " submissions");
+  $("mine-banner").innerHTML =
+    `<strong>Signed in as ${currentUser.name}.</strong><span>Staff see only their own receipts. Most never sign in at all — they send by WhatsApp and get the answer back the same way.</span>`;
+  const tb = $("mine"); tb.textContent = "";
+  if (!mine.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6" class="empty">Nothing submitted today.</td>';
+    tb.appendChild(tr); return;
+  }
+  mine.forEach(sub => {
+    const res = evaluate(sub), d = decisions[sub.id];
+    const status = d ? `${d.action} by ${d.by}`
+      : rules.autoRelease.has(res.verdict) ? "Settled automatically" : "With finance";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${sub.vendor}</td><td class="ident">${sub.age} ago</td>` +
+      `<td><span class="pill">${CHANNELS[sub.ch]}</span></td>` +
+      `<td class="n">${fmt(res.receiptTotal,res.currency)}</td>` +
+      `<td class="n">${fmt(res.reimbursable,res.currency)}</td>` +
+      `<td class="ident">${status}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+/* ---------- boot ---------- */
+
+function renderAll() {
+  renderSession(); renderNav();
+  if (view === "queue") { renderIntake(); renderTriage(); renderQueue(); renderDetail(); }
+  else if (view === "people") renderPeople();
+  else if (view === "billing") renderBilling();
+  else if (view === "channels") renderChannels();
+  else if (view === "mine") renderMine();
+  else renderRules();
+}
+
+$("headcount").addEventListener("input", e => {
+  const w = workingCopy(SUBMISSIONS.find(s=>s.id===selectedId));
+  const v = e.target.value.trim();
+  let n = v === "" ? null : parseInt(v,10);
+  if (n !== null && Number.isNaN(n)) n = null;
+  w.attendees = n; renderAll();
+});
+$("src").addEventListener("change", e => { workingCopy(SUBMISSIONS.find(s=>s.id===selectedId)).source = e.target.value; renderAll(); });
+
+$("p-add").addEventListener("click", () => {
+  const name = $("p-name").value.trim();
+  if (!name) { $("p-name").focus(); return; }
+  PEOPLE.unshift({ name, staffId:$("p-staff").value.trim(), email:$("p-email").value.trim(),
+                   mobile:$("p-mobile").value.trim(), via:[], n:0, role:null });
+  ["p-name","p-staff","p-email","p-mobile"].forEach(id => { $(id).value = ""; });
+  renderAll();
+});
+
+selectedId = SUBMISSIONS.filter(isQueued)[0]?.id || SUBMISSIONS[0].id;
+renderAll();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>Expenze</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root {
+  --paper:#F7F6F2; --surface:#FFFFFF; --surface-2:#EFEEE8;
+  --ink:#171A18; --ink-2:#3B403C; --muted:#6E736C;
+  --rule:#DDDCD4; --rule-firm:#C6C5BB;
+  --brand:#1D4E3A; --brand-soft:#E3EDE6; --brand-deep:#123326;
+  --slate:#4A5768;
+  --flag:#96610F;
+  --radius:4px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:#121412; --surface:#1A1D1A; --surface-2:#222621;
+    --ink:#EDEFE9; --ink-2:#C4C9C1; --muted:#8C918A;
+    --rule:#31352F; --rule-firm:#444943;
+    --brand:#7FC49F; --brand-soft:#16301F; --brand-deep:#A9DCC0;
+    --slate:#A2AFC2;
+    --flag:#DBA65C;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:#121412; --surface:#1A1D1A; --surface-2:#222621;
+  --ink:#EDEFE9; --ink-2:#C4C9C1; --muted:#8C918A;
+  --rule:#31352F; --rule-firm:#444943;
+  --brand:#7FC49F; --brand-soft:#16301F; --brand-deep:#A9DCC0;
+  --slate:#A2AFC2;
+  --flag:#DBA65C;
+}
+
+* { box-sizing:border-box; }
+body { background:var(--paper); color:var(--ink); font-family:"Archivo",ui-sans-serif,system-ui,sans-serif; font-size:16px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+.wrap { max-width:1120px; margin:0 auto; padding:0 22px; }
+section { padding:56px 0; border-top:1px solid var(--rule); }
+section:first-of-type { border-top:none; }
+
+h2 { font-family:"Fraunces",Georgia,serif; font-size:clamp(1.55rem,1.3rem + 1.1vw,2.15rem); font-weight:600; letter-spacing:-.02em; margin:0 0 8px; text-wrap:balance; }
+.lede { color:var(--muted); font-size:1rem; max-width:62ch; margin:0 0 26px; }
+.eyebrow { font-family:"IBM Plex Mono",monospace; font-size:.7rem; text-transform:uppercase; letter-spacing:.12em; color:var(--brand); margin:0 0 10px; font-weight:500; }
+
+/* ---------- nav ---------- */
+.topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0; flex-wrap:wrap; }
+.logo { display:flex; align-items:baseline; gap:2px; font-family:"Fraunces",Georgia,serif; font-size:1.4rem; font-weight:700; letter-spacing:-.03em; }
+.logo .dot { color:var(--brand); }
+.logo .tld { font-family:"IBM Plex Mono",monospace; font-size:.72rem; color:var(--muted); font-weight:400; letter-spacing:0; margin-left:5px; align-self:center; }
+.topnav { display:flex; gap:20px; flex-wrap:wrap; }
+.topnav a { color:var(--ink-2); text-decoration:none; font-size:.88rem; font-weight:500; }
+.topnav a:hover { color:var(--brand); text-decoration:underline; text-underline-offset:3px; }
+
+/* ---------- hero ---------- */
+.hero { display:grid; grid-template-columns:1.05fr .95fr; gap:44px; align-items:start; padding:44px 0 56px; }
+@media (max-width:880px){ .hero { grid-template-columns:1fr; gap:34px; } }
+.hero h1 { font-family:"Fraunces",Georgia,serif; font-size:clamp(2.2rem,1.6rem + 2.6vw,3.5rem); font-weight:700; line-height:1.06; letter-spacing:-.035em; margin:0 0 16px; text-wrap:balance; }
+.hero h1 em { font-style:normal; color:var(--brand); }
+.hero .sub { font-size:1.08rem; color:var(--ink-2); max-width:52ch; margin:0 0 22px; }
+.hero .proof { display:flex; flex-wrap:wrap; gap:10px 26px; margin-bottom:24px; }
+.hero .proof div { display:flex; flex-direction:column; }
+.hero .proof .n { font-family:"IBM Plex Mono",monospace; font-size:1.6rem; font-weight:600; letter-spacing:-.03em; color:var(--brand); font-variant-numeric:tabular-nums; }
+.hero .proof .l { font-size:.79rem; color:var(--muted); }
+
+/* ---------- signup card ---------- */
+.signup { background:var(--surface); border:1px solid var(--rule-firm); border-radius:var(--radius); padding:22px; box-shadow:0 1px 0 var(--rule); }
+.signup h3 { font-family:"Fraunces",Georgia,serif; font-size:1.2rem; font-weight:600; margin:0 0 4px; letter-spacing:-.02em; }
+.signup .note { font-size:.82rem; color:var(--muted); margin:0 0 16px; }
+.fld { display:flex; flex-direction:column; gap:5px; margin-bottom:13px; }
+.fld label { font-size:.73rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:600; }
+.fld input { font:inherit; font-size:.92rem; padding:9px 11px; border:1px solid var(--rule-firm); border-radius:var(--radius); background:var(--paper); color:var(--ink); width:100%; }
+.fld input:focus-visible { outline:2px solid var(--brand); outline-offset:1px; }
+.fld .help { font-size:.75rem; color:var(--muted); }
+.cta { font:inherit; font-size:.95rem; font-weight:600; padding:11px 18px; border-radius:var(--radius); border:1px solid var(--brand); background:var(--brand); color:var(--paper); cursor:pointer; width:100%; }
+:root:not([data-theme="light"]) .cta { color:var(--brand-soft); }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .cta { color:#0F1F16; } }
+:root[data-theme="dark"] .cta { color:#0F1F16; }
+.cta:hover { background:var(--brand-deep); border-color:var(--brand-deep); }
+.signup .owner { margin:12px 0 0; font-size:.78rem; color:var(--muted); }
+.formmsg { margin:12px 0 0; font-family:"IBM Plex Mono",monospace; font-size:.78rem; color:var(--brand); }
+
+/* ---------- channels ---------- */
+.chgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(226px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:var(--radius); overflow:hidden; }
+.chgrid > article { background:var(--surface); padding:20px; display:flex; flex-direction:column; gap:7px; }
+.chgrid h3 { margin:0; font-size:1rem; font-weight:600; letter-spacing:-.01em; }
+.chgrid .how { font-family:"IBM Plex Mono",monospace; font-size:.74rem; color:var(--brand); }
+.chgrid p { margin:0; font-size:.87rem; color:var(--muted); }
+
+/* ---------- flow ---------- */
+.flow { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:var(--radius); overflow:hidden; }
+.flow > div { background:var(--surface); padding:18px; display:flex; flex-direction:column; gap:5px; }
+.flow .step { font-family:"IBM Plex Mono",monospace; font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+.flow h3 { margin:0; font-size:.98rem; font-weight:600; }
+.flow p { margin:0; font-size:.85rem; color:var(--muted); }
+.flow .accent { background:var(--brand-soft); }
+
+/* ---------- roles ---------- */
+.roles { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:16px; }
+.role { background:var(--surface); border:1px solid var(--rule); border-radius:var(--radius); padding:18px; display:flex; flex-direction:column; gap:8px; }
+.role .badge { font-family:"IBM Plex Mono",monospace; font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; align-self:flex-start; padding:3px 8px; border-radius:var(--radius); background:var(--brand-soft); color:var(--brand); font-weight:600; }
+.role h3 { margin:0; font-size:1.02rem; font-weight:600; }
+.role p { margin:0; font-size:.87rem; color:var(--muted); }
+.role ul { margin:2px 0 0; padding-left:17px; font-size:.85rem; color:var(--ink-2); display:flex; flex-direction:column; gap:3px; }
+
+/* ---------- pricing ---------- */
+.pricenote { display:flex; gap:9px; align-items:baseline; flex-wrap:wrap; background:var(--surface-2); border:1px solid var(--rule); border-left:3px solid var(--flag); border-radius:var(--radius); padding:11px 14px; margin-bottom:20px; font-size:.85rem; color:var(--ink-2); }
+.pricenote strong { color:var(--flag); }
+.tablewrap { overflow-x:auto; border:1px solid var(--rule); border-radius:var(--radius); background:var(--surface); }
+table { width:100%; border-collapse:collapse; font-size:.9rem; }
+th, td { padding:11px 15px; text-align:left; border-bottom:1px solid var(--rule); white-space:nowrap; }
+thead th { font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:600; background:var(--surface-2); }
+tbody tr:last-child td { border-bottom:none; }
+tbody tr.best { background:var(--brand-soft); }
+td.num { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; text-align:right; }
+td.rate { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums; text-align:right; color:var(--brand); font-weight:600; }
+td.save { font-family:"IBM Plex Mono",monospace; font-size:.8rem; color:var(--muted); text-align:right; }
+.credit-def { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; margin-top:20px; }
+.credit-def div { display:flex; flex-direction:column; gap:4px; }
+.credit-def .k { font-family:"IBM Plex Mono",monospace; font-size:.7rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+.credit-def .v { font-size:.89rem; color:var(--ink-2); }
+
+/* ---------- api ---------- */
+.apisplit { display:grid; grid-template-columns:.9fr 1.1fr; gap:26px; align-items:start; }
+@media (max-width:820px){ .apisplit { grid-template-columns:1fr; } }
+pre { margin:0; background:var(--surface); border:1px solid var(--rule); border-radius:var(--radius); padding:16px; overflow-x:auto; font-family:"IBM Plex Mono",monospace; font-size:.79rem; line-height:1.6; color:var(--ink-2); }
+pre .c { color:var(--muted); }
+pre .s { color:var(--brand); }
+.idlist { display:flex; flex-direction:column; gap:11px; }
+.idlist div { display:flex; gap:11px; align-items:baseline; }
+.idlist code { font-family:"IBM Plex Mono",monospace; font-size:.78rem; background:var(--surface-2); border:1px solid var(--rule); border-radius:var(--radius); padding:2px 7px; white-space:nowrap; }
+.idlist span { font-size:.87rem; color:var(--muted); }
+
+footer { border-top:1px solid var(--rule); padding:26px 0 44px; display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; align-items:baseline; }
+footer p { margin:0; font-size:.82rem; color:var(--muted); max-width:60ch; }
+footer .prototype { font-family:"IBM Plex Mono",monospace; font-size:.73rem; color:var(--flag); }
+
+@media (prefers-reduced-motion: reduce){ *{transition:none!important;animation:none!important;} }
+</style>
+
+<div class="wrap">
+
+  <div class="topbar">
+    <span class="logo">Expenze<span class="dot">.</span><span class="tld">expenze.ai</span></span>
+    <nav class="topnav">
+      <a href="#how">How it works</a>
+      <a href="#roles">Roles</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#api">API</a>
+    </nav>
+  </div>
+
+  <section class="hero">
+    <div>
+      <p class="eyebrow">Agentic expense auditing</p>
+      <h1>Your team sends receipts. <em>Most never reach a human.</em></h1>
+      <p class="sub">Expenze reads every receipt, checks it against your policy, and settles what's clean on its own. Finance sees only the exceptions &mdash; with every deduction traced to a line item and a rule.</p>
+      <div class="proof">
+        <div><span class="n">64%</span><span class="l">cleared with no human</span></div>
+        <div><span class="n">1</span><span class="l">credit per receipt</span></div>
+        <div><span class="n">3</span><span class="l">ways to send one in</span></div>
+      </div>
+      <p class="sub" style="font-size:.9rem;color:var(--muted)">WhatsApp &middot; Email &middot; API. No app for your staff to install.</p>
+    </div>
+
+    <form class="signup" id="signup">
+      <h3>Create your organisation</h3>
+      <p class="note">Whoever signs up becomes the Solution Owner and can invite everyone else.</p>
+      <div class="fld">
+        <label for="org">Organisation name</label>
+        <input type="text" id="org" name="org" placeholder="Mobil80 Technologies" autocomplete="organization" required>
+      </div>
+      <div class="fld">
+        <label for="root">Root email address</label>
+        <input type="email" id="root" name="root" placeholder="finance@yourcompany.com" autocomplete="email" required>
+        <span class="help">Used for billing and to recover access. Not a login password &mdash; we send a sign-in link.</span>
+      </div>
+      <button class="cta" type="submit">Start with 50 free credits</button>
+      <p class="owner">No card required. Credits are consumed one per receipt, and you top up in bulk.</p>
+      <p class="formmsg" id="formmsg" hidden></p>
+    </form>
+  </section>
+
+  <section id="how">
+    <p class="eyebrow">How receipts arrive</p>
+    <h2>Three ways in, one pipeline</h2>
+    <p class="lede">Staff use whatever they already have open. Every route lands on the same audit, so the verdict does not depend on how the receipt was sent.</p>
+
+    <div class="chgrid">
+      <article>
+        <h3>WhatsApp</h3>
+        <span class="how">photograph &rarr; send</span>
+        <p>Staff forward a photo to your Expenze number. Identified by the mobile number they sent from &mdash; nothing to install, nothing to log into.</p>
+      </article>
+      <article>
+        <h3>Email</h3>
+        <span class="how">forward &rarr; receipts@yourorg</span>
+        <p>Forward the booking confirmation or the PDF invoice. Identified by the sending address, attachments and inline images both read.</p>
+      </article>
+      <article>
+        <h3>API</h3>
+        <span class="how">POST /v1/receipts</span>
+        <p>Your travel desk, HRMS or ERP pushes receipts on a person's behalf, identified by staff ID, email or mobile. Same audit, same credit.</p>
+      </article>
+    </div>
+
+    <div class="flow" style="margin-top:22px">
+      <div>
+        <span class="step">Step 1</span>
+        <h3>Read</h3>
+        <p>Vendor, date, currency, every line item, and how many people it covered &mdash; or an honest "unknown" rather than a guess.</p>
+      </div>
+      <div>
+        <span class="step">Step 2</span>
+        <h3>Judge</h3>
+        <p>The model categorises each line. Is that a beverage or a bar tab? That is the judgment worth paying a model for.</p>
+      </div>
+      <div class="accent">
+        <span class="step">Step 3</span>
+        <h3>Apply the rules</h3>
+        <p>Deterministic code, not the model, computes the verdict. The same receipt always produces the same outcome.</p>
+      </div>
+      <div>
+        <span class="step">Step 4</span>
+        <h3>Settle or queue</h3>
+        <p>In policy, it clears. Out of policy or missing a fact, it goes to Finance with the reason already stated.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="roles">
+    <p class="eyebrow">Who does what</p>
+    <h2>Three roles, and only one of them is a full-time job</h2>
+    <p class="lede">Most of your organisation never signs in. They send a receipt and get told what happened.</p>
+
+    <div class="roles">
+      <article class="role">
+        <span class="badge">Solution Owner</span>
+        <h3>Sets the rules</h3>
+        <p>Created automatically for whoever signs the organisation up.</p>
+        <ul>
+          <li>Writes and versions expense policy</li>
+          <li>Decides what the agent may settle alone</li>
+          <li>Buys credits and sees the burn rate</li>
+          <li>Appoints Finance Executives</li>
+        </ul>
+      </article>
+      <article class="role">
+        <span class="badge">Finance Executive</span>
+        <h3>Works the queue</h3>
+        <p>Administers the system day to day and decides the exceptions.</p>
+        <ul>
+          <li>Approves, rejects or queries what the agent flagged</li>
+          <li>Corrects a category or a headcount</li>
+          <li>Manages staff records and identifiers</li>
+          <li>Reads policy, but cannot change it</li>
+        </ul>
+      </article>
+      <article class="role">
+        <span class="badge">Staff</span>
+        <h3>Sends receipts</h3>
+        <p>Identified by email address, mobile number, or both.</p>
+        <ul>
+          <li>Sends by WhatsApp or email</li>
+          <li>Gets a plain-language answer, not a status code</li>
+          <li>Answers a follow-up when a fact is missing</li>
+          <li>No licence, no seat, no login required</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <p class="eyebrow">Pricing</p>
+    <h2>You pay per receipt, not per person</h2>
+    <p class="lede">One credit is consumed per expense submission &mdash; whether it clears automatically or goes to a human. Credits do not expire. Buy in bulk; the rate falls as the volume rises.</p>
+
+    <div class="pricenote">
+      <strong>Placeholder rates.</strong>
+      <span>The tier sizes are fixed as specified; the prices below are a proposed volume curve, not a commercial decision. Overwrite them before this page goes anywhere near a customer.</span>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Bundle</th>
+            <th scope="col" style="text-align:right">Credits</th>
+            <th scope="col" style="text-align:right">Price (INR)</th>
+            <th scope="col" style="text-align:right">Per receipt</th>
+            <th scope="col" style="text-align:right">vs. entry rate</th>
+          </tr>
+        </thead>
+        <tbody id="tiers"></tbody>
+      </table>
+    </div>
+
+    <div class="credit-def">
+      <div><span class="k">What consumes a credit</span><span class="v">One receipt submitted, through any channel. A resubmission of the same receipt after a query does not.</span></div>
+      <div><span class="k">What does not</span><span class="v">Seats, roles, invitations, API keys, storage, or a Finance Executive working the queue.</span></div>
+      <div><span class="k">Expiry</span><span class="v">Credits do not expire. Unused balance carries forward indefinitely.</span></div>
+      <div><span class="k">Running out</span><span class="v">Receipts keep arriving and queue as unprocessed; nothing is lost. Auditing resumes the moment you top up.</span></div>
+    </div>
+  </section>
+
+  <section id="api">
+    <p class="eyebrow">For third-party systems</p>
+    <h2>Push a receipt on someone's behalf</h2>
+    <p class="lede">Your travel desk, HRMS or ERP submits on behalf of a member of staff. Identify them however your system already knows them.</p>
+
+    <div class="apisplit">
+      <div class="idlist">
+        <div><code>staff_id</code><span>Your own unique identifier, if you keep one. Preferred &mdash; it survives people changing their phone or email.</span></div>
+        <div><code>email</code><span>Matches the staff record's registered address.</span></div>
+        <div><code>mobile</code><span>E.164 format. The same number used for WhatsApp submissions.</span></div>
+        <div><code>idempotency_key</code><span>Safe to retry. A repeated key returns the original result and never spends a second credit.</span></div>
+      </div>
+
+      <pre><span class="c"># One receipt, billed as one credit</span>
+curl -X POST https://api.expenze.ai/v1/receipts \
+  -H <span class="s">"Authorization: Bearer $EXPENZE_API_KEY"</span> \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d '{
+    <span class="s">"staff_id"</span>: <span class="s">"M80-4417"</span>,
+    <span class="s">"idempotency_key"</span>: <span class="s">"trip-8821-dinner"</span>,
+    <span class="s">"image_url"</span>: <span class="s">"https://.../receipt.jpg"</span>
+  }'
+
+<span class="c"># => 202 Accepted</span>
+<span class="c"># {   "expense_id": "exp_9f2c...",</span>
+<span class="c">#     "status": "auditing",</span>
+<span class="c">#     "credits_remaining": 4821  }</span></pre>
+    </div>
+  </section>
+
+  <footer>
+    <p><strong>Expenze</strong> &mdash; agentic expense auditing. Receipts in by WhatsApp, email or API; verdicts out with the reasoning attached.</p>
+    <p class="prototype">Prototype &mdash; nothing on this page is live, and no account is created.</p>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* Tier sizes are fixed by the spec. Rates are a proposed volume curve:
+   a smooth taper from ₹18.00 to ₹9.00 per receipt, i.e. 50% off at the top
+   bundle. Cost of goods is roughly ₹2.50 a receipt in model tokens, so every
+   row here holds margin — but these are placeholders, not a pricing decision. */
+const TIERS = [
+  { credits:1000,   rupees:18000  },
+  { credits:2500,   rupees:41250  },
+  { credits:5000,   rupees:75000  },
+  { credits:10000,  rupees:135000 },
+  { credits:25000,  rupees:300000 },
+  { credits:50000,  rupees:525000 },
+  { credits:100000, rupees:900000 }
+];
+const NAMES = ["Starter","Team","Growth","Business","Scale","Enterprise","Volume"];
+
+const inr = (n) => "₹" + n.toLocaleString("en-IN");
+const rate = (t) => t.rupees / t.credits;
+const entry = rate(TIERS[0]);
+
+const tbody = document.getElementById("tiers");
+TIERS.forEach((t, i) => {
+  const r = rate(t);
+  const off = Math.round((1 - r / entry) * 100);
+  const tr = document.createElement("tr");
+  if (i === TIERS.length - 1) tr.className = "best";
+  tr.innerHTML =
+    `<td>${NAMES[i]}</td>` +
+    `<td class="num">${t.credits.toLocaleString("en-IN")}</td>` +
+    `<td class="num">${inr(t.rupees)}</td>` +
+    `<td class="rate">₹${r.toFixed(2)}</td>` +
+    `<td class="save">${off === 0 ? "—" : off + "% lower"}</td>`;
+  tbody.appendChild(tr);
+});
+
+const form = document.getElementById("signup");
+const msg = document.getElementById("formmsg");
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const org = document.getElementById("org").value.trim() || "your organisation";
+  msg.hidden = false;
+  msg.textContent = `Prototype — no account was created for ${org} and nothing was sent.`;
+});
+</script>
+
+</body>
+</html>

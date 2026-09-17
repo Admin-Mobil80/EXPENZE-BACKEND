@@ -1,0 +1,16 @@
+# Lambda runtime deps, built into build/layer by scripts/build_layer.sh.
+#
+# boto3/botocore are deliberately absent: the Lambda Python 3.13 runtime ships
+# both, and pulling them in costs ~110MB of layer for no benefit.
+openai>=1.0.0
+
+# Rendering PDF receipts to images so the extraction path can read them.
+#
+# pypdfium2 wraps Google's PDFium and is BSD-3/Apache-2.0. PyMuPDF is the
+# better-known choice and is AGPL: using it in a product we sell would mean
+# either open-sourcing Expenze or buying a commercial licence from Artifex.
+# That is a licensing decision, not a technical one, and it belongs in the
+# dependency list where somebody can see it.
+pypdfium2>=4.0.0
+# Pillow turns the rendered bitmap into a PNG and downsamples oversized scans.
+Pillow>=10.0.0

@@ -1,0 +1,12 @@
+*.pyc
+__pycache__/
+.venv/
+cdk.out/
+.env
+*.egg-info/
+
+# Generated Lambda layer - rebuild with scripts/build_layer.sh
+build/
+
+# macOS
+.DS_Store

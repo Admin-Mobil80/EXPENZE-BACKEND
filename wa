@@ -1,0 +1,9 @@
+#!/bin/sh
+# The WhatsApp migration tool, runnable from any directory without an alias.
+#
+# It needs the project's virtualenv (boto3 is not in the system python) and the
+# cloudmeter profile, and both were easy to get wrong from a shell sitting in
+# another folder - so they are pinned here rather than remembered each time.
+exec env AWS_PROFILE="${AWS_PROFILE:-cloudmeter}" \
+  /Users/riyadrasheed/ExpensifyAI/.venv/bin/python \
+  /Users/riyadrasheed/ExpensifyAI/tools/wa_migrate.py "$@"
