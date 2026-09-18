@@ -1695,27 +1695,26 @@ def _claim_retype(token: str, body: dict[str, Any], origin: str | None) -> dict[
         return _reply(409, {
             "error": "This claim has already been reimbursed."}, origin)
 
-    # A human touched this claim, so the agent may no longer release it.
+    # Saved, and that is all. The claim is not sent back round the agent.
     #
-    # Without this, correcting a claim approved it. A receipt that arrived with
-    # no expense type is blocked on `no_rule_for_expense_type` and sits in the
-    # review queue; a reviewer sets the type; the auditor re-runs and now finds
-    # nothing wrong - so the claim read as cleared-by-the-agent, left the review
-    # queue, and landed in Pending settlement without anybody having approved
-    # anything. The reviewer's correction became their approval, silently, and
-    # the person who would have pressed Approve never got to.
+    # It used to be: the status went to `queued`, the stream woke the worker,
+    # and the whole policy ran again under the reviewer's type. That was built
+    # on the idea that a corrected claim should be re-decided by the engine -
+    # and it is the wrong idea for a claim that has already reached a human.
+    # Once it is in front of a person, they decide it: they read the bill, the
+    # findings and the figures, and they approve or reject. Nothing in between.
     #
-    # Supplying a fact the agent was missing is not the same act as deciding
-    # somebody should be paid, and a reviewer must be able to set a type simply
-    # to see what it does. So the correction is recorded and the claim comes
-    # back to a person - who may then approve it, which is one more click and
-    # the whole point.
+    # What a reviewer is doing here is answering a question of fact the agent
+    # could not - what kind of expense this is, what it is denominated in,
+    # which cost centre it belongs to. Those are needed for the claim to be
+    # paid and reported, not for it to be re-judged. So they are written down,
+    # the claim stays where it is, and the decision stays the human's.
     #
-    # Distinct from `pulled_back`, which means finance disagreed with a verdict
-    # the agent reached on its own. This is a claim the agent never decided.
-    sets = ["answered_by = :who", "corrected_by = :who", "corrected_at = :cat",
-            "#s = :queued"]
-    values: dict[str, Any] = {":queued": "queued", ":audited": "audited",
+    # That also removes the loop this endpoint used to open: a write that woke
+    # the stream that wrote the row that woke the stream, which cost 576
+    # attempts in twenty minutes the first time it went wrong.
+    sets = ["answered_by = :who", "corrected_by = :who", "corrected_at = :cat"]
+    values: dict[str, Any] = {":audited": "audited",
                               ":cat": int(time.time()),
                               ":who": acting.get("name") or actor}
     if expense_type:
@@ -1747,9 +1746,9 @@ def _claim_retype(token: str, body: dict[str, Any], origin: str | None) -> dict[
         return _reply(409, {
             "error": "That claim is being read right now — reload and try again."}, origin)
 
-    # Re-tagging is a decision about money even though nobody calls it one: it
-    # is what decides which cap the claim is measured against, and a claim can
-    # go from blocked to payable on this write alone.
+    # Recorded, because it is how the claim will be reported on and which cost
+    # centre it will be paid from. Not a decision about whether it is paid -
+    # that is the reviewer's next click, and theirs alone.
     _logged(acting, actor, "expense type corrected", item, detail=", ".join(
         p for p in (
             (f"{(item.get('verdict') or {}).get('expense_type') or 'untagged'} → {expense_type}"
@@ -1762,7 +1761,7 @@ def _claim_retype(token: str, body: dict[str, Any], origin: str | None) -> dict[
 
     logger.info("%s re-typed by %s (%s, %s)", submission_id, actor,
                 expense_type or "type unchanged", currency or "currency unchanged")
-    return _reply(200, {"status": "requeued", "expense_type": expense_type,
+    return _reply(200, {"status": "saved", "expense_type": expense_type,
                         "currency": currency, "submission_id": submission_id}, origin)
 
 
@@ -1987,15 +1986,31 @@ def _claim_review(token: str, body: dict[str, Any], origin: str | None) -> dict[
 
     verdict = item.get("verdict") or {}
 
-    # A claim nothing covers cannot be approved into a payment: there is no
-    # cap it was checked against, no exclusion applied, and no rule anybody
-    # could point at afterwards to say why that amount was right. The reviewer
-    # tags it first, which sends it round the policy engine properly.
-    if action == "approved" and policy.blocks_on(verdict, "no_rule_for_expense_type"):
-        return _reply(409, {
-            "error": ("Set an expense type first. Nothing in your policy covers this "
-                      "claim, so there is no rule it could be approved under.")
-        }, origin)
+    # Every approved claim carries an expense type this organisation has
+    # configured. No exceptions, and not because of anything the agent found.
+    #
+    # The check used to be "does the stored verdict block on
+    # no_rule_for_expense_type", which asked about the agent's reading rather
+    # than about the claim - so a claim whose verdict predated a rule was
+    # refused while its type was already right, and a claim tagged
+    # `not_covered` by an agent that never blocked on it could go through
+    # untagged. Either way the type is what every report groups by, and a
+    # payment filed under nothing is a line in the accounts nobody can explain.
+    #
+    # Asked of the claim as it now stands - the reviewer's answer if they gave
+    # one, the agent's reading otherwise - against the enabled types in the
+    # policy as it stands now.
+    if action == "approved":
+        chosen = str(item.get("answered_expense_type")
+                     or verdict.get("expense_type") or "")
+        known = set(policy.expense_type_ids(
+            policy.rules_for(_org_of(actor) or {})))
+        if chosen not in known:
+            return _reply(409, {
+                "error": ("Set an expense type first. Every claim is reported "
+                          "under one, so a payment cannot be approved without "
+                          "it.")
+            }, origin)
 
     # And a claim attributed to nothing cannot be approved into one either.
     #

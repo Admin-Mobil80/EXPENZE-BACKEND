@@ -41,13 +41,23 @@ class OneReceiptIsTwoCalls(unittest.TestCase):
         fn = llm.split('if kind == "images":', 1)[1].split("return parts", 1)[0]
         self.assertIn("for page in receipt_input[\"pages\"]", fn)
 
-    def test_a_re_audit_does_not_re_read_the_receipt(self):
-        # The bill has not changed - a person said what kind of expense it is -
-        # so re-extracting would pay for the same answer twice.
+    def test_a_correction_costs_no_model_call_at_all(self):
+        # It used to cost one. A reviewer setting the expense type sent the
+        # claim back round the engine, which re-ran the policy and regenerated
+        # the prose - a call per correction, and four of them on one courier
+        # bill that kept coming back with the same wrong answer.
+        #
+        # Nothing re-decides a claim that has reached a person, so the
+        # correction is a database write and the reviewer reads what is
+        # already on screen.
         handler = src("handler.py")
-        fn = handler.split("def reaudit(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn("No second extraction", fn)
-        self.assertNotIn("extract_receipt", fn)
+        self.assertNotIn("def reaudit(", handler)
+        worker = src("auditor_worker.py")
+        self.assertNotIn("def _reaudit(", worker)
+        auth = src("auth.py")
+        retype = auth.split("def _claim_retype(", 1)[1].split("\ndef ", 1)[0]
+        for spender in ("llm.", "extract_receipt", "explain("):
+            self.assertNotIn(spender, retype)
 
 
 class AFailureIsNotRetriedForEver(unittest.TestCase):

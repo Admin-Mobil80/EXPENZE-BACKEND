@@ -302,27 +302,21 @@ def _audit_one(row: dict[str, Any]) -> None:
         logger.info("%s is already being audited or is done", submission_id)
         return
 
-    # A claim coming back round because a reviewer corrected it. The bill was
-    # read once and has not changed; re-reading it would buy a second model
-    # call and a risk of slightly different line items.
-    retyped = str(row.get("answered_expense_type") or "")
-    recurrency = str(row.get("answered_currency") or "")
-    if (retyped or recurrency) and row.get("receipt"):
-        try:
-            _reaudit(submission_id, row,
-                     expense_type=retyped, currency_override=recurrency)
-        except Exception as exc:
-            # Deliberately not released back to `queued`. A release is a retry,
-            # and a retry of a re-audit is a loop: the release is itself a
-            # modification, which wakes the stream, which fails the same way.
-            # This span cost 576 attempts in twenty minutes before it was
-            # noticed. The first audit is still valid and the question still
-            # stands, so the claim goes back to where it was and the answer is
-            # dropped rather than re-tried for ever.
-            logger.exception("re-audit of %s failed", submission_id)
-            _abandon_reaudit(submission_id, f"{type(exc).__name__}: {exc}")
-        return
-
+    # There is no re-audit branch here any more.
+    #
+    # A reviewer correcting a claim used to send it back round this worker,
+    # which re-ran the whole policy under their type and rewrote the verdict.
+    # That is the wrong shape for a claim that has already reached a person:
+    # once it is in front of one, they decide it. They read the bill, the
+    # findings and the figures, and they approve or reject - nothing in
+    # between, and nothing that re-decides it on their behalf between their
+    # answer and their decision.
+    #
+    # `_claim_retype` now writes the type, currency and group and leaves the
+    # claim where it is, so nothing arrives here with `answered_expense_type`
+    # on it. That also closes the loop this branch lived at the edge of: a
+    # write that woke the stream that wrote the row that woke the stream,
+    # which cost 576 attempts in twenty minutes the first time it went wrong.
     try:
         obj = _s3.get_object(Bucket=RECEIPTS_BUCKET, Key=key)
         data = obj["Body"].read()
@@ -568,67 +562,6 @@ def _audit_one(row: dict[str, Any]) -> None:
         logger.exception("audit of %s failed", submission_id)
         _release(submission_id, f"{type(exc).__name__}: {exc}")
         raise
-
-
-def _abandon_reaudit(submission_id: str, reason: str) -> None:
-    """Put a claim back as it was, without asking for another attempt."""
-    try:
-        _intake.update_item(
-            Key={"submission_id": submission_id},
-            UpdateExpression=("SET #s = :audited, last_error = :e "
-                              "REMOVE answered_expense_type, answered_currency"),
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":audited": "audited", ":e": reason[:300]},
-        )
-    except Exception:
-        logger.exception("could not stand down the re-audit of %s", submission_id)
-
-
-def _reaudit(submission_id: str, row: dict[str, Any], expense_type: str = "",
-             currency_override: str = "") -> None:
-    """Decide a claim again under a type or currency a reviewer corrected."""
-    # A reviewer's correction wins: the caps are per currency, so reading a
-    # dollar invoice as rupees puts it three orders of magnitude under one.
-    currency = (currency_override
-                or (row.get("verdict") or {}).get("currency")
-                or (row.get("receipt") or {}).get("currency") or "")
-    # The organisation, so the claim is decided under its policy and not the
-    # built-in one. See `handler.reaudit`.
-    outcome = handler.reaudit(row["receipt"], str(currency),
-                              expense_type=expense_type,
-                              org_id=str(row.get("org_id") or ""))
-    _intake.update_item(
-        Key={"submission_id": submission_id},
-        UpdateExpression=("SET #s = :s, verdict = :v, receipt = :r, rationale = :n, "
-                          "audited_at = :t REMOVE last_error, "
-                          "answered_expense_type, answered_currency"),
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={
-            ":s": "audited",
-            ":v": json.loads(json.dumps(outcome["verdict"]), parse_float=Decimal),
-            ":r": json.loads(json.dumps(outcome["receipt"]), parse_float=Decimal),
-            ":n": outcome["rationale"],
-            ":t": int(time.time()),
-        },
-    )
-    logger.info("%s re-audited (%s): %s", submission_id,
-                expense_type or "type unchanged", outcome["verdict"]["verdict"])
-
-    # Told to the sender only when the re-audit settles something for them.
-    #
-    # A headcount they supplied does: they answered a question and the answer
-    # produced a verdict, so the verdict is theirs to hear. A reviewer changing
-    # the expense type does not - the claim goes back to that reviewer for a
-    # decision, and "your claim was approved" sent before anybody approved it
-    # is a message we would have to take back.
-    #
-    # `answered_expense_type` and `answered_currency` are written by one caller
-    # only, `_claim_retype` in auth.py, which is owner and finance only. So
-    # their presence is exactly "a reviewer corrected this".
-    corrected_by_reviewer = bool(row.get("answered_expense_type")
-                                 or row.get("answered_currency"))
-    if not corrected_by_reviewer:
-        _tell_sender({**row, "receipt": outcome["receipt"]}, outcome["verdict"])
 
 
 # Only where the person is waiting on an answer in a thread they opened. A

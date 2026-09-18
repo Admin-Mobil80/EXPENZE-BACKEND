@@ -596,51 +596,14 @@ def _plain_numbers(value: Any) -> Any:
     return value
 
 
-def reaudit(receipt: dict[str, Any], currency: str, *,
-            expense_type: str = "", org_id: str = "") -> dict[str, Any]:
-    """Decide an already-read receipt again, under a type a reviewer supplied.
-
-    No second extraction. The bill has not changed - a person has said what
-    kind of expense it is - so re-reading it would cost another model call to
-    arrive at the same line items, and risk arriving at slightly different
-    ones.
-
-    The prose is regenerated, because the figures it quotes have moved.
-
-    `org_id` is what makes this the organisation's policy rather than the
-    built-in one. Without it this path passed no rules at all and `_run_policy`
-    fell back to `DEFAULT_RULES` - the exact failure that function's docstring
-    describes as fixed, still live on the way back round.
-
-    What it looked like: a courier bill for INR 1,400, the type set to Courier
-    by a reviewer, Courier enabled in the policy with a INR 10,000 cap, and the
-    claim came back "No enabled rule covers expense type 'courier'" every time
-    it was re-checked, because `courier` is a type this company added and the
-    built-in set has never heard of it. Pressing Re-check again could not help;
-    nothing about the claim was wrong.
-
-    The quieter half is worse. A type the built-in set *does* have - meals,
-    travel - matched, so no finding appeared, and the claim was judged against
-    the built-in cap instead of the company's. A correction is the one moment
-    a human is explicitly asking the engine to decide again, and it was the
-    moment the engine stopped using their policy.
-    """
-    receipt = _plain_numbers(dict(receipt))
-    # A reviewer saying what this expense actually is. The model picks a type
-    # from what it can see on the bill and answers `not_covered` when nothing
-    # fits, which is the right answer for it to give - but the claim cannot be
-    # paid under a type no rule covers, so a person supplies one and the whole
-    # policy runs again against it.
-    if expense_type:
-        receipt["expense_type"] = expense_type
-        receipt["expense_type_rationale"] = "Set by a reviewer."
-
-    verdict = _run_policy(receipt, currency, policy.rules_for(_org(org_id)))
-    verdict["currency_assumed"] = False
-    verdict["currency_note"] = ""
-    rationale = _get_client().explain(receipt, verdict, AUDIT_SYSTEM)
-    return {"receipt": receipt, "verdict": verdict, "rationale": rationale,
-            "model": os.environ.get("OPENAI_MODEL", "unknown")}
+# There is no `reaudit` here any more.
+#
+# A reviewer correcting a claim used to send it back round the engine under
+# their expense type. Once a claim has reached a person, they decide it: they
+# read the bill, the findings and the figures, and they approve or reject.
+# Nothing re-decides it between their answer and their decision. `_claim_retype`
+# in auth.py records the type, currency and group and leaves the claim where it
+# is.
 
 
 def _handle_post(body: dict[str, Any]) -> dict[str, Any]:

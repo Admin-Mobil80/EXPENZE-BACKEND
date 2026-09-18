@@ -246,14 +246,14 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
     """The model answers `not_covered` when nothing on the bill matches a type.
 
     That is the honest answer for it to give - a payment to a named individual
-    is not a meal, a subscription or a trip. But approving such a claim puts a
-    figure into a payment run with no cap behind it, no exclusion applied and
-    no rule anybody could point at afterwards to say why that amount was right.
+    is not a meal, a subscription or a trip. But a claim cannot be approved
+    under it: every report groups by expense type, so a payment filed under
+    nothing is a line in the accounts nobody can explain. A person supplies
+    one, and then decides the claim themselves.
 
-    And the EXPENSE TYPE control recomputed the figures in the browser and
-    wrote nothing down, so a reviewer could re-tag a claim, watch the verdict
-    change in front of them, approve it, and leave a stored verdict still
-    saying the type was not covered.
+    The gate itself, and the fact that saving an answer no longer re-decides
+    anything, are held in test_a_human_decides_it_themselves.py. What is left
+    here is the endpoint that records the answer.
     """
 
     def setUp(self):
@@ -264,26 +264,24 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
         with open(os.path.join(ROOT, "..", "PORTAL", "app.html"), encoding="utf-8") as h:
             self.app = h.read()
 
-    def test_approval_is_refused_while_no_rule_covers_it(self):
-        self.assertIn('policy.blocks_on(verdict, "no_rule_for_expense_type")', self.review)
+    def test_approval_is_refused_without_a_configured_type(self):
         self.assertIn("Set an expense type first.", self.review)
+        self.assertIn("if chosen not in known:", self.review)
 
     def test_rejecting_one_is_still_allowed(self):
         # "Nothing covers this" is a perfectly good reason to refuse a claim,
         # and forcing a type on it first would be make-believe.
-        guard = self.review.split("no_rule_for_expense_type", 1)[1].split("origin)", 1)[0]
-        self.assertIn('action == "approved"', self.review.split(
-            "no_rule_for_expense_type", 1)[0][-120:])
+        guard = self.review.split("known = set(policy.expense_type_ids(",
+                                  1)[1].split("origin)", 1)[0]
         self.assertNotIn("rejected", guard)
 
-    def test_a_reviewer_can_set_the_type_and_it_is_decided_again(self):
+    def test_a_reviewer_can_set_the_type_and_it_is_recorded(self):
         self.assertIn("answered_expense_type = :t", self.retype)
-        self.assertIn('":queued": "queued"', self.retype)
         # Conditional on it being audited, so a claim mid-read is not clobbered.
         self.assertIn('ConditionExpression="#s = :audited"', self.retype)
 
     def test_only_a_reviewer_may_set_it(self):
-        # Re-tagging changes what a claim is worth.
+        # It decides how the claim is reported and which budget pays it.
         self.assertIn('not runs_the_org(acting)', self.retype)
 
     def test_an_invented_type_is_refused(self):
@@ -292,66 +290,27 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
     def test_a_settled_claim_cannot_be_retyped(self):
         self.assertIn('item.get("outcome") == "settled"', self.retype)
 
-    def test_the_whole_policy_runs_again_rather_than_the_browser_recomputing(self):
-        # The figures on screen are the console's arithmetic; what somebody is
-        # paid has to come from the engine.
-        worker = open(os.path.join(ROOT, "lambda_src", "auditor_worker.py"),
-                      encoding="utf-8").read()
-        self.assertIn("expense_type=retyped", worker)
-        handler = open(os.path.join(ROOT, "lambda_src", "handler.py"),
-                       encoding="utf-8").read()
-        reaudit = handler.split("def reaudit(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn('receipt["expense_type"] = expense_type', reaudit)
-        # Against the organisation's own rules. Passing none fell back to the
-        # built-in set, so a type this company added read as uncovered however
-        # many times a reviewer pressed Re-check.
-        self.assertIn("_run_policy(receipt, currency, policy.rules_for(_org(org_id)))",
-                      reaudit)
-
     def test_the_console_withholds_approve_and_says_why(self):
-        self.assertIn("const untagged = res.violations.some", self.app)
-        self.assertIn("Nothing in the stored verdict covers this claim", self.app)
-        # Reject stays; approve does not.
-        block = self.app.split("const choices = (untagged || unsaved || needsGroup)",
+        self.assertIn("const typeOk = rules.types.some(t => t.enabled && t.id === w.type);",
+                      self.app)
+        block = self.app.split("const choices = (!typeOk || unsaved || needsGroup)",
                                1)[1].split(";", 1)[0]
         self.assertIn("Reject", block)
         self.assertNotIn("Approve as reviewed", block.split("[[", 1)[0] + block.split("]]", 1)[0])
 
-    def test_a_blocked_claim_can_always_be_re_run(self):
-        # The control appeared on `changed || untagged`, and moving it to the
-        # decision row kept only the first half - so a claim whose stored
-        # verdict says "no rule covers this" but whose type is already right
-        # had no button at all. Pristine, so nothing to save; blocked, so
-        # nothing to approve. The only escape was to set the type to something
-        # else and back, which made it pristine again.
-        self.assertIn("if (unsaved || untagged) {", self.app)
-
-    def test_the_button_does_not_promise_to_save_nothing(self):
-        self.assertIn(': unsaved ? "Save and re-check" : "Re-check"', self.app)
-
-    def test_the_note_names_both_ways_out(self):
-        # From the screen a missing type and a verdict older than the rule that
-        # covers it look identical, and being told only "set a type" while
-        # looking at the type you set is maddening.
-        self.assertIn("press Re-check if it is already right", self.app)
-
     def test_approve_also_waits_for_an_unsaved_change_to_be_saved(self):
         # Everything above the buttons is a preview the moment a reviewer
-        # touches a control, but approving decides money against the verdict
-        # the server last computed. Setting the type and pressing Approve was
-        # refused with "Set an expense type first" - true of the claim on file,
-        # nonsense to somebody looking at the type they just set.
+        # touches a control; the server decides against what was written down.
         self.assertIn("const unsaved = !isPristine(sub, w);", self.app)
-        self.assertIn("Save and re-check first; the verdict on file is still the earlier one",
-                      self.app)
+        self.assertIn("Save it before approving.", self.app)
 
-    def test_the_unsaved_message_wins_over_the_untagged_one(self):
+    def test_the_unsaved_message_wins_over_the_requirement(self):
         # A reviewer who has just set the type is told to save it, not told to
         # set it. Being handed back an instruction you have visibly already
         # followed is how a product loses trust in everything else it says.
         note = self.app.split("s.textContent = unsaved", 1)[1]
-        self.assertLess(note.index("Save and re-check first"),
-                        note.index("Nothing in the stored verdict covers"))
+        self.assertLess(note.index("Save it before approving"),
+                        note.index("Set an expense type above"))
 
     def test_the_note_names_the_change_rather_than_announcing_one(self):
         # "You have unsaved changes" makes a reviewer hunt for what they
@@ -363,69 +322,35 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
     def test_one_save_at_a_time_and_the_flag_says_so(self):
         # The state cannot live on the button: the control is redrawn on every
         # render, so the element in flight is not the element that comes back.
-        fn = self.app.split("async function saveAndRecheck()", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("if (!sub || retypeBusy) return;", fn)
-        self.assertIn("retypeBusy = true;", fn)
-        self.assertIn("retypeBusy = false;", fn)
-        self.assertIn("save.disabled = retypeBusy;", self.app)
+        fn = self.app.split("async function saveAnswers()", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("if (!sub || savingOf) return;", fn)
+        self.assertIn("savingOf = sub.id;", fn)
+        self.assertIn("savingOf = null;", fn)
+        self.assertIn("save.disabled = savingOf === sub.id;", self.app)
 
     def test_the_flag_is_cleared_on_every_path(self):
         # Left set by a network error, it is a button that never works again.
-        fn = self.app.split("async function saveAndRecheck()", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("catch (_)", fn)
-        self.assertLess(fn.index("retypeBusy = false;"),
-                        fn.index("if (!ok) return show("))
-
-    def test_the_result_is_written_after_the_render_not_before(self):
-        # renderDetail hides `answer-msg` on every pass, so showing first and
-        # rendering second wipes the one line a reviewer reads.
-        fn = self.app.split("async function saveAndRecheck()", 1)[1].split("\n}\n", 1)[0]
-        self.assertLess(fn.rindex("renderAll();"), fn.index("show(`Set to"))
-
-    def test_a_claim_being_re_read_after_a_correction_stays_listed(self):
-        # Otherwise the claim you are deciding disappears for the few seconds
-        # the re-audit takes, and the obvious next move is to press something
-        # again.
-        queued = self.app.split("const isQueued = (sub) => {", 1)[1].split("\n};", 1)[0]
-        self.assertIn("if (stillReading(sub)) return !!sub.correctedAt", queued)
+        fn = self.app.split("async function saveAnswers()", 1)[1].split("\n}\n", 1)[0]
+        self.assertLess(fn.index("catch"), fn.index("savingOf = null;"))
 
     def test_both_controls_call_the_same_function_directly(self):
-        # The decision-row button reached this by calling `.click()` on the
-        # hidden copy, which worked exactly once: the hidden button was
-        # disabled while saving and only re-enabled on failure, so after one
-        # successful save every later click went to a dead element. The visible
-        # button was rebuilt by the next render, looked enabled, and did
-        # nothing.
-        self.assertIn('$("retype-go").addEventListener("click", saveAndRecheck)', self.app)
-        self.assertIn('save.addEventListener("click", saveAndRecheck)', self.app)
-        code = "\n".join(l for l in self.app.splitlines()
-                         if not l.strip().startswith(("*", "//", "/*")))
-        self.assertNotIn('$("retype-go").click()', code)
-
-    def test_the_save_control_exists_in_exactly_one_visible_place(self):
-        # It was in the correction panel and again in the decision row. Two of
-        # one control makes the panel look as though its button did something
-        # different, and the decision row is where a reviewer is looking once
-        # they have used the dropdowns.
+        # The panel's own copy stays hidden; the visible one is in the
+        # decision row, where a reviewer is looking once they have used the
+        # dropdowns.
         block = self.app.split("if (retype) retype.hidden =", 1)[1].split(";", 1)[0]
         self.assertIn("true", block)
         self.assertIn('save.id = "retype-inline"', self.app)
-
-    def test_the_hidden_one_still_owns_the_handler(self):
-        # Kept in the DOM so both routes run identical code.
-        self.assertIn('$("retype-go").addEventListener', self.app)
-        self.assertIn('$("retype-go").click()', self.app)
+        self.assertIn('$("retype-go").addEventListener("click", saveAnswers);',
+                      self.app)
 
     def test_the_changed_check_still_decides_whether_saving_is_offered(self):
-        # Moved to the decision row, where `unsaved` gates it - same question,
-        # asked where the buttons are.
         self.assertIn("const unsaved = !isPristine(sub, w);", self.app)
         frozen = self.app.split("const frozen =", 1)[1].split(";", 1)[0]
         # Every reason a control is dead belongs in this one expression - a
         # second pass that assigns to the same controls writes `false` back
         # over it, which is how a settled claim came to offer an editable
         # Expense type again.
-        self.assertIn("paid || unread || rechecking || !reviewingHere()", frozen)
+        self.assertIn("paid || unread || saving || !reviewingHere()", frozen)
 
     def test_the_route_is_wired(self):
         with open(os.path.join(ROOT, "expensifyai", "stack.py"), encoding="utf-8") as h:
@@ -574,14 +499,16 @@ class TheControlsOnAClosedClaimAreInert(unittest.TestCase):
         self.assertIn("!reviewingHere()", frozen)
 
     def test_a_currency_correction_now_persists(self):
-        # The caps are per currency, so a dollar invoice read as rupees is
-        # three orders of magnitude under one and clears in silence.
+        # A dollar invoice read as rupees is three orders of magnitude out,
+        # and the figure a reviewer approves has to be in the currency that
+        # was actually spent.
+        #
+        # It no longer re-runs the engine - nothing does, once a claim is in
+        # front of a person - so what is asserted is that the correction is
+        # written down and validated, not that a second audit consumes it.
         self.assertIn("answered_currency = :c", self.retype)
         self.assertIn("money.normalise(", self.retype)
-        worker = open(os.path.join(ROOT, "lambda_src", "auditor_worker.py"),
-                      encoding="utf-8").read()
-        self.assertIn("currency_override", worker)
-        self.assertIn("currency = (currency_override", worker)
+        self.assertIn("That is not a currency we support.", self.retype)
 
     def test_changing_neither_is_refused(self):
         self.assertIn("Nothing to change", self.retype)

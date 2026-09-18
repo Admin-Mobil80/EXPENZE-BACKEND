@@ -2784,7 +2784,7 @@ class ASettledClaimIsDeadInEveryControl(unittest.TestCase):
         # Plus `rechecking`: while the agent has the claim back, the type,
         # the currency and the group are about to be re-judged, so they are
         # not editable either.
-        self.assertIn("const frozen = paid || unread || rechecking || !reviewingHere();",
+        self.assertIn("const frozen = paid || unread || saving || !reviewingHere();",
                       self.detail)
 
     def test_the_four_controls_are_assigned_exactly_once(self):
@@ -3924,19 +3924,24 @@ class TypingAClaimNothingCoveredIsConfirmed(unittest.TestCase):
     """Correcting a wrong type is routine. Giving one to a claim that had none
     is a judgment.
 
-    It decides which cap the claim is measured against, the claim is re-audited
-    on the strength of it, and it may clear straight into the payment run - with
-    the reviewer's name on the change.
+    It decides how the claim is reported and which budget pays it, and it is
+    recorded against the reviewer's name.
 
-    Only when it was untagged: a confirmation on every correction is one people
-    learn to click through, and then it is worth nothing on the one that
+    It used to decide more: the claim was re-audited on the strength of it and
+    could clear straight into the payment run. It cannot any more - a claim in
+    front of a person is decided by that person - so the question no longer
+    promises that, and it says what is actually true: the claim stays here for
+    them to approve or reject.
+
+    Only asked when it was untagged. A confirmation on every correction is one
+    people learn to click through, and then it is worth nothing on the one that
     mattered.
     """
 
     def setUp(self):
         with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as handle:
             self.app = handle.read()
-        self.fn = self.app.split("async function saveAndRecheck()", 1)[1].split("\n}\n", 1)[0]
+        self.fn = self.app.split("async function saveAnswers()", 1)[1].split("\n}\n", 1)[0]
 
     def test_it_asks_only_when_nothing_covered_the_claim(self):
         self.assertIn('v.code === "no_rule_for_expense_type"', self.fn)
@@ -3946,9 +3951,16 @@ class TypingAClaimNothingCoveredIsConfirmed(unittest.TestCase):
         self.assertIn("Set this claim to ${label0}?", self.fn)
 
     def test_it_says_what_follows(self):
-        self.assertIn("may", self.fn)
-        self.assertIn("clear for payment without further review", self.fn)
-        self.assertIn("recorded", self.fn)
+        self.assertIn("recorded against your name", self.fn)
+        self.assertIn("the claim stays", self.fn)
+
+    def test_it_no_longer_promises_an_automatic_release(self):
+        # The sentence outlived the behaviour by one commit. A confirmation
+        # that describes something the product no longer does is worse than
+        # none, because somebody reads it and plans around it.
+        question = self.fn.split("window.confirm(", 1)[1].split(")) return;", 1)[0]
+        self.assertNotIn("clear for payment", question)
+        self.assertNotIn("re-checked", question)
 
     def test_declining_sends_nothing(self):
         before = self.fn.split("window.confirm(", 1)[1]

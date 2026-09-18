@@ -85,11 +85,13 @@ class MovingBetweenClaimsWithoutGoingBack(unittest.TestCase):
         self.assertIn("claimSiblings = siblingsFor(claimFrom);", opener)
         self.assertNotIn("siblingsFor(", self.fn)
 
-    def test_it_says_where_you_are_and_where_back_goes(self):
-        self.assertIn("at + 1", self.fn)
-        self.assertIn("claimSiblings.length", self.fn)
-        # Where the claim *belongs*, not where the reader came from: one opened
-        # out of the review queue and approved is in Pending settlement now.
+    def test_it_says_how_much_is_left_and_where_back_goes(self):
+        # It used to print a position - "1 of 3" - counted against the list as
+        # it was when the claim was opened. The tab badge counts what is still
+        # undecided, so the two disagreed on one screen the moment anything
+        # was decided. The bar answers the same question as the badge now.
+        self.assertIn("still waiting", self.fn)
+        self.assertNotIn("at + 1", self.fn)
         self.assertIn("claimHome(", self.fn)
         self.assertIn("TAB_LABEL[home]", self.fn)
 

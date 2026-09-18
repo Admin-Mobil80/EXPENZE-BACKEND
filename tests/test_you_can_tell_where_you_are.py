@@ -81,28 +81,32 @@ class ADecidedClaimSaysWhereItWent(unittest.TestCase):
                        "it has left the review queue"):
             self.assertIn(phrase, self.nav)
 
-    def test_the_position_is_still_the_list_as_it_was_opened(self):
-        # The counting is not the bug. Recomputing it would renumber the
-        # sequence under the reader, which is the disorientation the claim
-        # page exists to remove.
-        # And it says which set it is counting, so it cannot be read as the
-        # tab badge - which counts what is still undecided and therefore
-        # disagrees the moment a claim is decided.
-        self.assertIn("` · ${at + 1} of ${claimSiblings.length} in this set`",
+    def test_the_bar_counts_what_is_left_not_where_you_are(self):
+        # "1 of 3" counted a position in the queue as it was when the claim
+        # was opened, and the tab badge counts what is still undecided, so the
+        # moment anything was decided the two disagreed on one screen.
+        self.assertIn("` · ${waiting} still waiting`", self.nav)
+        self.assertNotIn("of ${claimSiblings.length}", self.nav)
+
+    def test_it_uses_the_same_arithmetic_as_the_badge(self):
+        self.assertIn('home === "queue" ? SUBMISSIONS.filter(isQueued).length',
                       self.nav)
+
+    def test_the_sequence_is_still_followed_even_though_it_is_not_reported(self):
+        # Stepping walks the list the reader was given. Recomputing that under
+        # somebody halfway through it is the disorientation this page exists
+        # to remove; not printing it is a different thing from not having it.
         siblings = self.app.split("function openClaim(id, from) {", 1)[1].split(
             "\n}", 1)[0]
         self.assertIn("claimSiblings = siblingsFor(claimFrom);", siblings)
+        step = self.app.split("function stepClaim(delta) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("const next = claimSiblings[at + delta];", step)
 
     def test_deciding_a_claim_does_not_move_the_reader(self):
         # `claimHome` returns where they came from, not where the claim now
         # belongs - so Back leads out of the list they were working.
         home = self.app.split("function claimHome(sub) {", 1)[1].split("\n}", 1)[0]
         self.assertIn("if (claimFrom) return claimFrom;", home)
-
-    def test_stepping_still_follows_the_original_sequence(self):
-        step = self.app.split("function stepClaim(delta) {", 1)[1].split("\n}", 1)[0]
-        self.assertIn("const next = claimSiblings[at + delta];", step)
 
 
 class ApprovingDoesNotHandYouAPaymentRun(unittest.TestCase):

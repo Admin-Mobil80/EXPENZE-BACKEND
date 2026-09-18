@@ -157,36 +157,55 @@ class ACorrectedClaimWaitsForAPerson(unittest.TestCase):
         self.assertIn("const pay = payable(sub);", payable)
 
 
-class TheSubmitterIsNotToldEarly(unittest.TestCase):
+class TheSubmitterHearsNothingFromACorrection(unittest.TestCase):
+    """A reviewer setting the expense type is not an outcome.
+
+    This used to need arranging. The correction sent the claim back round the
+    agent, the agent produced a verdict, and the verdict was messaged to the
+    submitter - so somebody was told their claim had been approved before any
+    person had approved it, and the message had to be taken back. The re-audit
+    grew a `corrected_by_reviewer` gate to suppress it.
+
+    There is no re-audit now. A reviewer's answer is written down and the claim
+    stays in front of them; nothing computes a verdict in between, so there is
+    nothing to send. What is asserted here is that the endpoint recording the
+    answer does not notify anybody - the submitter hears from the decision,
+    which is the reviewer's next click.
+    """
 
     def setUp(self):
-        self.worker = read("lambda_src/auditor_worker.py")
-        self.reaudit = self.worker.split("def _reaudit(", 1)[1].split("\ndef ", 1)[0]
+        self.auth = read("lambda_src/auth.py")
+        self.retype = self.auth.split("def _claim_retype(", 1)[1].split(
+            "\ndef ", 1)[0]
 
-    def test_a_reviewers_correction_sends_no_outcome_message(self):
-        self.assertIn("corrected_by_reviewer", self.reaudit)
-        self.assertIn("if not corrected_by_reviewer:", self.reaudit)
-        # With the receipt that was just read: `row` is the stream's image of
-        # the claim from before the audit, so it carries no vendor.
-        self.assertIn('_tell_sender({**row, "receipt": outcome["receipt"]}, outcome["verdict"])',
-                      self.reaudit)
+    def test_recording_an_answer_messages_nobody(self):
+        self.assertNotIn("notify.send", self.retype)
 
-    def test_a_headcount_the_submitter_supplied_still_does(self):
-        # They answered a question; the answer produced a verdict; the verdict
-        # is theirs to hear. Only the reviewer-corrected case is suppressed.
-        gate = self.reaudit.split("corrected_by_reviewer = ", 1)[1].split("\n\n", 1)[0]
-        self.assertIn("answered_expense_type", gate)
-        self.assertIn("answered_currency", gate)
-        self.assertNotIn("answered_attendee_count", gate)
+    def test_and_does_not_send_the_claim_anywhere_that_would(self):
+        # Requeueing it was the mechanism: the worker audited it and the
+        # worker tells the sender.
+        self.assertNotIn('":queued": "queued"', self.retype)
 
-    def test_those_two_fields_have_exactly_one_writer(self):
-        # The gate above is only as true as this. If anything else started
-        # writing them, the suppression would silence messages it should not.
-        auth = read("lambda_src/auth.py")
+    def test_the_worker_no_longer_has_a_correction_path_at_all(self):
+        worker = read("lambda_src/auditor_worker.py")
+        self.assertNotIn("corrected_by_reviewer", worker)
+        self.assertNotIn("def _reaudit(", worker)
+
+    def test_those_two_fields_still_have_exactly_one_writer(self):
+        # They are how the claim is reported and paid; a second writer would
+        # be a second answer to a question only a reviewer may answer.
+        # Writes, not mentions: `_claim_review` reads `answered_expense_type`
+        # to check the claim is tagged, which is the whole point of it being
+        # written, and a test that counted readers would forbid that.
         for field in ("answered_expense_type", "answered_currency"):
-            writers = [fn for fn in re.findall(r"def (_[a-z_]+)\(", auth)
-                       if field in auth.split(f"def {fn}(", 1)[1].split("\ndef ", 1)[0]]
+            writers = [fn for fn in re.findall(r"def (_[a-z_]+)\(", self.auth)
+                       if f"{field} = :" in
+                       self.auth.split(f"def {fn}(", 1)[1].split("\ndef ", 1)[0]]
             self.assertEqual(["_claim_retype"], writers, field)
+
+    def test_the_decision_is_what_reaches_them(self):
+        review = self.auth.split("def _claim_review(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("notify.send", review)
 
 
 if __name__ == "__main__":
