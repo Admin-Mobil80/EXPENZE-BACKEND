@@ -85,7 +85,11 @@ class ADecidedClaimSaysWhereItWent(unittest.TestCase):
         # The counting is not the bug. Recomputing it would renumber the
         # sequence under the reader, which is the disorientation the claim
         # page exists to remove.
-        self.assertIn("` · ${at + 1} of ${claimSiblings.length}`", self.nav)
+        # And it says which set it is counting, so it cannot be read as the
+        # tab badge - which counts what is still undecided and therefore
+        # disagrees the moment a claim is decided.
+        self.assertIn("` · ${at + 1} of ${claimSiblings.length} in this set`",
+                      self.nav)
         siblings = self.app.split("function openClaim(id, from) {", 1)[1].split(
             "\n}", 1)[0]
         self.assertIn("claimSiblings = siblingsFor(claimFrom);", siblings)
@@ -99,6 +103,56 @@ class ADecidedClaimSaysWhereItWent(unittest.TestCase):
     def test_stepping_still_follows_the_original_sequence(self):
         step = self.app.split("function stepClaim(delta) {", 1)[1].split("\n}", 1)[0]
         self.assertIn("const next = claimSiblings[at + delta];", step)
+
+
+class ApprovingDoesNotHandYouAPaymentRun(unittest.TestCase):
+    """The claim page turned into a settlement page under the reviewer.
+
+    Approve a claim out of the review queue and the same page you were
+    standing on grew "INR 1,936.00 owed to Reena K R." and a Record payment
+    button - with "Review queue - 1 of 3" still above it. One claim of three
+    decided, and the product had handed over a payment run.
+
+    They are different jobs, usually different people, certainly different
+    days: a reviewer decides what the company owes, finance moves the money.
+    Doing the second in the middle of the first is two roles on one screen
+    with nothing marking where one ends. Pending settlement is one click away
+    and is entirely about this.
+
+    A claim opened *from* Pending settlement keeps the button - that is the
+    case it was built for, and the reason the guard is on where the reader
+    came from rather than on the claim's state.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split(
+            "function renderSettleOnClaim(sub, mayReview) {", 1)[1].split(
+            "\n}", 1)[0]
+
+    def test_no_payment_controls_on_a_claim_opened_from_the_queue(self):
+        self.assertIn('if (claimFrom === "queue") return;', self.fn)
+
+    def test_the_guard_is_before_anything_is_drawn(self):
+        self.assertLess(self.fn.index('if (claimFrom === "queue") return;'),
+                        self.fn.index('owed.textContent'))
+
+    def test_pending_settlement_still_has_it(self):
+        # The guard names the queue rather than excluding everything but
+        # payments, so a claim reached from Settled or a link is unaffected.
+        self.assertNotIn('if (claimFrom !== "payments") return;', self.fn)
+        self.assertIn('[["Record payment", "primary", "pay"]]', self.fn)
+
+    def test_the_reviewer_can_still_change_their_mind(self):
+        # Reject stays on the actions row: approving and immediately thinking
+        # better of it is a review action, and it is the one this screen is
+        # for.
+        # To the end of the decided-claim branch, not a fixed slice: a branch
+        # added above it should not decide whether this passes.
+        actions = self.app.split('const abox = $("actions")', 1)[1].split(
+            "} else if (agentMayRelease(sub)) {", 1)[0]
+        self.assertIn('decision.action !== "Rejected"', actions)
+        self.assertIn('no.textContent = "Reject"', actions)
 
 
 if __name__ == "__main__":
