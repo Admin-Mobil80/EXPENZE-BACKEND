@@ -77,7 +77,7 @@ class ExpensifyAIStack(Stack):
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             # PoC: tear the table down with the stack rather than leaving an
             # orphan behind in an account shared with a dozen live products.
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # ------------------------------------------------------------------
@@ -88,7 +88,7 @@ class ExpensifyAIStack(Stack):
             "OpenAiApiKey",
             secret_name="expensifyai/openai-api-key",
             description="OpenAI API key for ExpensifyAI - value set out-of-band, never in code",
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # ------------------------------------------------------------------
@@ -193,7 +193,7 @@ class ExpensifyAIStack(Stack):
             # Codes delete themselves. Nothing here should outlive its 10-minute
             # window, and an expired code left lying around is a liability.
             time_to_live_attribute="expires_at",
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # Who is allowed to receive a sign-in code. Without these, the OTP
@@ -212,7 +212,7 @@ class ExpensifyAIStack(Stack):
                 name="org_id", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
         # WhatsApp identifies a sender only by number, so that has to be
         # queryable without knowing the email.
@@ -232,7 +232,7 @@ class ExpensifyAIStack(Stack):
                 name="org_id", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # The auditor is declared above this table, so it picks it up here:
@@ -253,7 +253,7 @@ class ExpensifyAIStack(Stack):
                 name="email", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # Every credit movement, attributed. Credits are money; a balance that
@@ -269,7 +269,7 @@ class ExpensifyAIStack(Stack):
                 name="ts", type=dynamodb.AttributeType.NUMBER
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         intake_table = dynamodb.Table(
@@ -285,7 +285,7 @@ class ExpensifyAIStack(Stack):
             # rather than being called by each adapter, because a webhook
             # cannot wait the tens of seconds two model passes take.
             stream=dynamodb.StreamViewType.NEW_IMAGE,
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # Machine credentials for the third-party intake endpoint. Keyed by the
@@ -299,7 +299,7 @@ class ExpensifyAIStack(Stack):
                 name="key_hash", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # One row per idempotency key an integration has used, so a retried
@@ -315,7 +315,7 @@ class ExpensifyAIStack(Stack):
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             time_to_live_attribute="expires_at",
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # One row per receipt fingerprint, so "have we seen this before?" is an
@@ -331,7 +331,7 @@ class ExpensifyAIStack(Stack):
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             time_to_live_attribute="expires_at",
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # Every decision a person made about somebody's money, appended and
@@ -401,7 +401,7 @@ class ExpensifyAIStack(Stack):
                 name="key", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # ------------------------------------------------------------------
@@ -422,8 +422,7 @@ class ExpensifyAIStack(Stack):
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             encryption=s3.BucketEncryption.S3_MANAGED,
             enforce_ssl=True,
-            removal_policy=RemovalPolicy.DESTROY,
-            auto_delete_objects=True,
+            removal_policy=RemovalPolicy.RETAIN,
             # The browser PUTs an upload straight here against a presigned URL,
             # and reads the original back the same way, so the site's origin
             # has to be allowed on the bucket itself.
@@ -469,7 +468,7 @@ class ExpensifyAIStack(Stack):
                 name="order_id", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # Razorpay keys. The value is set out-of-band like every other
@@ -481,7 +480,7 @@ class ExpensifyAIStack(Stack):
             secret_name="expenze/razorpay",
             description=("Razorpay: key_id, key_secret, webhook_secret. "
                          "Test keys carry rzp_test_; live carry rzp_live_."),
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         # Signs session tokens. Generated by CloudFormation and never seen by a
@@ -494,7 +493,7 @@ class ExpensifyAIStack(Stack):
             generate_secret_string=secretsmanager.SecretStringGenerator(
                 password_length=64, exclude_punctuation=True
             ),
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         auth_fn = lambda_.Function(
@@ -861,8 +860,7 @@ class ExpensifyAIStack(Stack):
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             encryption=s3.BucketEncryption.S3_MANAGED,
             enforce_ssl=True,
-            removal_policy=RemovalPolicy.DESTROY,
-            auto_delete_objects=True,
+            removal_policy=RemovalPolicy.RETAIN,
             lifecycle_rules=[
                 # Raw messages are evidence for "why was this claim created?",
                 # not a permanent store. They contain personal data.
@@ -959,7 +957,7 @@ class ExpensifyAIStack(Stack):
             "WhatsAppConfig",
             secret_name="expenze/whatsapp",
             description="Meta WhatsApp Cloud API: wabaId, phoneNumberId, accessToken, appSecret, webhookVerifyToken",
-            removal_policy=RemovalPolicy.DESTROY,
+            removal_policy=RemovalPolicy.RETAIN,
         )
 
         wa_fn = lambda_.Function(
@@ -1184,6 +1182,90 @@ class ExpensifyAIStack(Stack):
                 ),
             )
             CfnOutput(self, "CustomDomainUrl", value=f"https://{domain_name}/expenses")
+
+        # ------------------------------------------------------------------
+        # How the two frontends deploy themselves
+        # ------------------------------------------------------------------
+        #
+        # EXPENZE-PORTAL and EXPENZE-BMS each ship on a merge to `main`, from
+        # their own repositories, without anybody's laptop. This is the role
+        # their workflows assume.
+        #
+        # No access keys anywhere. GitHub signs a short-lived token describing
+        # which repository and which branch is asking; AWS trades it for
+        # credentials that expire with the job. A leaked workflow log is worth
+        # nothing, and there is no secret to rotate.
+        #
+        # This backend is deliberately NOT in that list. It changes what people
+        # are paid, so deploying it stays a deliberate act somebody performs,
+        # not something a merge triggers.
+        github_oidc = iam.OpenIdConnectProvider.from_open_id_connect_provider_arn(
+            self, "GitHubOidc",
+            f"arn:aws:iam::{Aws.ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com",
+        )
+
+        site_bucket_arns = [
+            f"arn:aws:s3:::expenze-site-{Aws.ACCOUNT_ID}",
+            f"arn:aws:s3:::expenze-bms-{Aws.ACCOUNT_ID}",
+        ]
+        deploy_role = iam.Role(
+            self, "GitHubDeployRole",
+            role_name="expenze-github-deploy",
+            description="Assumed by EXPENZE-PORTAL and EXPENZE-BMS GitHub Actions",
+            max_session_duration=Duration.hours(1),
+            assumed_by=iam.WebIdentityPrincipal(
+                github_oidc.open_id_connect_provider_arn,
+                {
+                    "StringEquals": {
+                        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                    },
+                    # Pinned to the branch, not just the repository. Without the
+                    # ref, anybody able to open a pull request could run a
+                    # workflow that assumes this role.
+                    #
+                    # The `@<number>` are not decoration and not wildcards worth
+                    # replacing. This organisation customises the OIDC subject
+                    # claim to embed immutable numeric ids - the org's and the
+                    # repository's - beside the names. The plain
+                    # `repo:OWNER/REPO:ref:...` form that GitHub documents is
+                    # simply not what arrives here, and a role trusting it is
+                    # refused every time with nothing on the AWS side to say
+                    # why. CloudTrail's AssumeRoleWithWebIdentity event carries
+                    # the subject that was actually presented; that is where
+                    # these came from.
+                    #
+                    # Matched exactly rather than with `@*`, which is the point
+                    # of the ids: a name can be released and re-registered by
+                    # somebody else, an id never is. The cost is that recreating
+                    # a repository changes its id and this stops trusting it -
+                    # read the new one out of CloudTrail and update it here.
+                    "StringLike": {
+                        "token.actions.githubusercontent.com:sub": [
+                            # Admin-Mobil80@208915971 / EXPENZE-PORTAL@1374740956
+                            "repo:Admin-Mobil80@208915971/EXPENZE-PORTAL@1374740956:ref:refs/heads/main",
+                            # Admin-Mobil80@208915971 / EXPENZE-BMS@1374742055
+                            "repo:Admin-Mobil80@208915971/EXPENZE-BMS@1374742055:ref:refs/heads/main",
+                        ],
+                    },
+                },
+            ),
+        )
+        # Exactly the two buckets, and nothing else in the account.
+        deploy_role.add_to_policy(iam.PolicyStatement(
+            actions=["s3:ListBucket"], resources=site_bucket_arns))
+        deploy_role.add_to_policy(iam.PolicyStatement(
+            actions=["s3:PutObject", "s3:DeleteObject", "s3:GetObject"],
+            resources=[f"{arn}/*" for arn in site_bucket_arns]))
+        # CloudFront invalidation takes no resource-level ARN in every partition,
+        # so it is scoped by condition to the two distributions instead of being
+        # left open across the account.
+        deploy_role.add_to_policy(iam.PolicyStatement(
+            actions=["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"],
+            resources=[
+                f"arn:aws:cloudfront::{Aws.ACCOUNT_ID}:distribution/E3F4MLCVNAXPPE",
+                f"arn:aws:cloudfront::{Aws.ACCOUNT_ID}:distribution/E1H8OQ41Q2MVGV",
+            ]))
+        CfnOutput(self, "GitHubDeployRoleArn", value=deploy_role.role_arn)
 
         CfnOutput(self, "ApiEndpoint", value=api.url_for_path("/expenses"))
         CfnOutput(self, "TableName", value=table.table_name)
