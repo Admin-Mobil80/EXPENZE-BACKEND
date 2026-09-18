@@ -151,7 +151,9 @@ class OwnClaimsAreFoundByIdentity(unittest.TestCase):
             self.source = handle.read()
 
     def test_the_filter_runs_through_ismine(self):
-        self.assertIn("SUBMISSIONS.filter(isMine)", self.source)
+        # Through `isMine`, whatever else it also filters on - the list also
+        # drops companion documents now, so one purchase is one row.
+        self.assertIn("SUBMISSIONS.filter(s => isMine(s) && !isCompanion(s))", self.source)
         self.assertNotIn("SUBMISSIONS.filter(s => s.who === currentUser.name)", self.source)
 
     def test_ismine_compares_email_addresses(self):

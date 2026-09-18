@@ -117,5 +117,47 @@ class ItIsNotAThingToDecideOrToPay(unittest.TestCase):
         self.assertIn("the credit for this one was returned", self.app)
 
 
+class FinanceKeepsBothDocuments(unittest.TestCase):
+    """Suppressing the companion as a claim must not suppress it as evidence.
+
+    An invoice and a receipt are both wanted in the record: the invoice is what
+    tax is reclaimed against, the receipt is proof the money actually left. A
+    claim that shows only one of them leaves finance holding half the paperwork
+    for a bill it has paid.
+    """
+
+    def setUp(self):
+        self.app = src("..", "PORTAL", "app.html")
+
+    def test_the_claim_knows_its_other_documents(self):
+        fn = self.app.split("function documentsFor(sub) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("s.companionOf === ref", fn)
+        self.assertIn("[sub, ...mine]", fn)
+
+    def test_they_are_named_by_their_filename(self):
+        # "the invoice" and "the receipt" are the names on the paper; Document 1
+        # and Document 2 are not what anybody is looking for.
+        self.assertIn("receiptName: s.receipt_name", self.app)
+        view = src("lambda_src", "auth.py").split("def _submission_view(", 1)[1] \
+                                           .split("\ndef ", 1)[0]
+        self.assertIn('"receipt_name"', view)
+
+    def test_the_strip_is_hidden_when_there_is_only_one(self):
+        # A switcher with a single option is furniture.
+        fn = self.app.split("function paintDocStrip(sub) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("strip.hidden = docs.length < 2;", fn)
+
+    def test_opening_another_claim_does_not_inherit_the_last_one_s_document(self):
+        # The worst way this could be wrong: somebody else's receipt shown
+        # under this claim's figures.
+        self.assertIn("if (selectedId !== sub.id) openDoc = null;", self.app)
+
+    def test_and_the_submitter_sees_one_row_per_purchase(self):
+        # The companion is the same money on the same day from the same
+        # vendor; listing it twice reads as having been charged twice.
+        self.assertIn("SUBMISSIONS.filter(s => isMine(s) && !isCompanion(s))", self.app)
+        self.assertIn("documents</span>", self.app)
+
+
 if __name__ == "__main__":
     unittest.main()

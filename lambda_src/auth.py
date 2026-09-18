@@ -2305,6 +2305,11 @@ def _submission_view(row: dict[str, Any], budget_currency: str = "") -> dict[str
         "group_id": row.get("group_id", ""),
         "group_status": row.get("group_status", ""),
         "has_original": bool(row.get("receipt_key")),
+        # The filename, so a claim carrying two documents can name them rather
+        # than calling them "Document 1" and "Document 2". It is what finance
+        # is looking for: "the invoice" and "the receipt" are the names on the
+        # paper.
+        "receipt_name": row.get("receipt_name", ""),
         "receipt_type": row.get("receipt_type", ""),
         "vendor": receipt.get("vendor", ""),
         "vendor_original": receipt.get("vendor_original", ""),
