@@ -182,7 +182,10 @@ class TheirClaimsAreStillTheirs(unittest.TestCase):
         # Their history is why this tab is worth having beyond the bug fix: a
         # finance question about last quarter names people who have left.
         app = read("../PORTAL/app.html")
-        body = app.split("shown.forEach(person => {", 1)[1][:3000]
+        # To the end of the row builder, not a fixed 3,000 characters of it -
+        # a slice that long passes or fails on how much comment sits above the
+        # line it is looking for.
+        body = app.split("shown.forEach(person => {", 1)[1].split("\n    tb.appendChild(tr);", 1)[0]
         self.assertIn("person.settled", body)
 
     def test_the_endpoint_counts_claims_for_everyone_on_the_roll(self):

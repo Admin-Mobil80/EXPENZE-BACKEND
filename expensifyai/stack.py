@@ -1111,6 +1111,7 @@ class ExpensifyAIStack(Stack):
         member_res.add_method("POST", auth_integration)
         member_res.add_resource("groups").add_method("POST", auth_integration)
         member_res.add_resource("transfer").add_method("POST", auth_integration)
+        member_res.add_resource("reinvite").add_method("POST", auth_integration)
         wa_auth = auth.add_resource("whatsapp")
         wa_auth.add_resource("add").add_method("POST", auth_integration)
         wa_auth.add_resource("verify").add_method("POST", auth_integration)

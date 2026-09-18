@@ -1017,6 +1017,93 @@ def _groups_put(token: str, body: dict[str, Any], origin: str | None) -> dict[st
     return _reply(200, {"groups": groups, "groups_rev": current_rev + 1}, origin)
 
 
+# How long an invitation is left alone before it may be sent again.
+#
+# Two days, because the common reason one is unaccepted on the first morning is
+# that the person has not opened their mail yet - and a second copy of the same
+# message before they have read the first teaches them the sender is noise.
+# It is also the floor between *any* two sends: nudging a nudge daily is how a
+# product ends up in a spam folder, taking every future invitation with it.
+REINVITE_AFTER = 48 * 3600
+
+
+def _reinvite(token: str, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
+    """Send an outstanding invitation again.
+
+    Twenty-six people invited and not signed in is not twenty-six people who
+    declined - it is mostly a message read on a phone, meant to be dealt with
+    later, and never dealt with. The cheapest way to onboard them is to ask
+    again.
+
+    Only what is genuinely outstanding, and only once the first one has had
+    time to work. Everything else about the membership is left exactly as it
+    was: this re-sends a message, it does not re-invite - the role, the groups
+    and the staff id they were given still stand.
+    """
+    actor = _identity_from_token(token)
+    if not actor:
+        return _reply(401, {"error": "Sign in to continue."}, origin)
+    org = _org_of(actor)
+    if not org:
+        return _reply(403, {"error": "No membership for this account."}, origin)
+
+    target = identity.normalise_email(str(body.get("email", "")))
+    if not target:
+        return _reply(400, {"error": "Name the person to invite again."}, origin)
+
+    member = identity.membership_in(org["org_id"], target)
+    if not member:
+        return _reply(404, {"error": "No member of this organisation by that address."},
+                      origin)
+    if not may_manage(org["_role"], member.get("role")):
+        return _reply(403, {
+            "error": f"You cannot manage a "
+                     f"{ROLE_LABEL.get(str(member.get('role')), 'member')}."}, origin)
+    if str(member.get("status") or "") != "invited":
+        return _reply(400, {
+            "error": "They have already accepted — there is nothing outstanding."}, origin)
+
+    now = int(time.time())
+    last = int(member.get("reinvited_at") or member.get("added_at") or 0)
+    waited = now - last
+    if last and waited < REINVITE_AFTER:
+        hours = max(1, (REINVITE_AFTER - waited) // 3600)
+        return _reply(429, {
+            "error": f"That invitation went out less than 48 hours ago. "
+                     f"You can send it again in about {hours} hours."}, origin)
+
+    org_name = str(org.get("name") or member.get("org_name") or "your organisation")
+    acting = identity.resolve_by_email(actor, channel=None) or {}
+    try:
+        _send_invite(target, org_name,
+                     str(acting.get("name") or "").strip() or actor,
+                     str(member.get("role") or "staff"))
+    except ClientError:
+        logger.exception("re-invite email failed for %s", target)
+        return _reply(502, {
+            "error": "The invitation could not be sent. Nothing was changed."}, origin)
+
+    # Written after the send, not before: a counter that goes up when nothing
+    # left the building is worse than no counter, because it starts the
+    # 48-hour clock on a message nobody got.
+    try:
+        _users.update_item(
+            Key={"email": target, "org_id": org["org_id"]},
+            UpdateExpression=("SET reinvited_at = :t, "
+                              "reinvites = if_not_exists(reinvites, :z) + :one"),
+            ExpressionAttributeValues={":t": now, ":z": 0, ":one": 1},
+        )
+    except Exception:
+        logger.exception("re-invited %s but could not record it", target)
+
+    _logged(acting, actor, "invitation sent again", {"org_id": org["org_id"]},
+            who=target,
+            detail=f"invited {max(0, waited) // 86400} days ago, still outstanding")
+    logger.info("%s re-invited %s to %s", actor, target, org["org_id"])
+    return _reply(200, {"status": "sent", "email": target,
+                        "name": member.get("name") or target}, origin)
+
+
 def _transfer_ownership(token: str, body: dict[str, Any],
                         origin: str | None) -> dict[str, Any]:
     """Hand the organisation to somebody else.
@@ -1199,10 +1286,8 @@ def _withdraw_open_claims(org_id: str, email: str, actor: str, by_name: str) -> 
             # fingerprint - somebody re-submitting the same bill legitimately
             # later should not be told it is a duplicate of a claim that was
             # cancelled when a colleague left.
-            duplicates.release(str(row.get("fingerprint", "") or ""), submission_id)
-            sha = str(row.get("receipt_sha256", "") or "")
-            if sha:
-                duplicates.release(duplicates.file_key(org_id, sha), submission_id)
+            duplicates.release_all({**row, "submission_id": submission_id,
+                                    "org_id": org_id})
             closed += 1
         except Exception:
             logger.exception("could not withdraw %s", submission_id)
@@ -1924,11 +2009,7 @@ def _claim_review(token: str, body: dict[str, Any], origin: str | None) -> dict[
     # holding the receipt's fingerprint, or the corrected resubmission the
     # person withdrew in order to make is turned away as a duplicate of it.
     if action in ("rejected", "withdrawn"):
-        duplicates.release(str(item.get("fingerprint", "") or ""), submission_id)
-        sha = str(item.get("receipt_sha256", "") or "")
-        if sha:
-            duplicates.release(
-                duplicates.file_key(str(item.get("org_id", "")), sha), submission_id)
+        duplicates.release_all({**item, "submission_id": submission_id})
 
     _logged(acting, actor, {
         "approved": "claim approved at review",
@@ -2079,11 +2160,7 @@ def _claim_outcome(token: str, body: dict[str, Any], origin: str | None) -> dict
     # nowhere - which is the one way this feature could cost somebody money
     # they were genuinely owed.
     if kind == "rejected":
-        duplicates.release(str(item.get("fingerprint", "") or ""), submission_id)
-        sha = str(item.get("receipt_sha256", "") or "")
-        if sha:
-            duplicates.release(
-                duplicates.file_key(str(item.get("org_id", "")), sha), submission_id)
+        duplicates.release_all({**item, "submission_id": submission_id})
 
     _logged(acting, actor,
             "claim settled" if kind == "settled" else f"claim {kind}", item,
@@ -2464,6 +2541,10 @@ def _people(token: str, body: dict[str, Any], origin: str | None) -> dict[str, A
         "open_claims": open_by_person.get(str(r.get("email", "")).lower(), 0),
         "settled_claims": settled_by_person.get(str(r.get("email", "")).lower(), 0),
         "total_claims": total_by_person.get(str(r.get("email", "")).lower(), 0),
+        # When the invitation last went out - the original, or the most recent
+        # nudge. What "48 hours" is measured from.
+        "invited_at": int(r.get("reinvited_at") or r.get("added_at") or 0),
+        "reinvites": int(r.get("reinvites") or 0),
         "email": r.get("email", ""),
         "name": r.get("name", ""),
         "staff_id": r.get("staff_id", ""),
@@ -2864,7 +2945,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         if not any(path.endswith(p) for p in
                    ("/whatsapp/add", "/whatsapp/verify", "/me", "/org", "/org/groups",
-                    "/member/groups", "/member/transfer", "/member",
+                    "/member/groups", "/member/transfer", "/member/reinvite", "/member",
                     "/org/budgets", "/org/rules",
                     "/claim/outcome",
                     "/claim/review", "/claim/retype",
@@ -2906,6 +2987,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _credits_order(tok, body, origin)
         if path.endswith("/credits/verify"):
             return _credits_verify(tok, body, origin)
+        if path.endswith("/member/reinvite"):
+            return _reinvite(tok, body, origin)
         if path.endswith("/member/transfer"):
             return _transfer_ownership(tok, body, origin)
         if path.endswith("/member/groups"):

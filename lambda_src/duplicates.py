@@ -295,3 +295,53 @@ def release(key: str, submission_id: str) -> None:
         )
     except Exception:
         logger.info("fingerprint %s was not ours to release", key[:40])
+
+
+def release_all(item: dict) -> int:
+    """Give back every fingerprint a claim is holding. Returns how many went.
+
+    A claim takes out **four** fingerprints, and letting go of two of them is
+    the same as letting go of none.
+
+    A DTDC bill for INR 1,400 was rejected, the submitter photographed it again
+    and sent it, and the second one was flagged `possible_duplicate` of the
+    rejected one - the exact failure the release exists to prevent, still
+    happening because rejection released the invoice key and the content hash
+    and left the other two held.
+
+    It was the sender key that caught it, and that is not a coincidence: it is
+    the same person, the same day, the same amount and the same currency by
+    definition when somebody resends their own bill, so it is *always* the key
+    that matches a resubmission. The two that were being released are the two
+    that often do not match a second attempt at all - the content hash needs
+    identical bytes, and a second photograph is never the same bytes, while the
+    invoice number is read by the model and varies between readings. Here it
+    varied by a dropped digit: `d350596726` against `d3505966726`. So the one
+    release that mattered was missing, and the two that fired were the ones
+    that had nothing to release.
+
+    Reconstructed from the claim rather than stored, for the two keys that were
+    never written down: the shape key is built from the filename and the byte
+    count, both of which are on the row. `release` is conditional on ownership,
+    so passing a key this claim never held, or one a later claim now owns, is
+    safely nothing.
+    """
+    submission_id = str(item.get("submission_id") or "")
+    if not submission_id:
+        return 0
+    org_id = str(item.get("org_id") or "")
+    sha = str(item.get("receipt_sha256") or "")
+    keys = [
+        str(item.get("fingerprint") or ""),
+        str(item.get("sender_fingerprint") or ""),
+        file_key(org_id, sha) if (org_id and sha) else "",
+        file_shape_key(org_id, str(item.get("receipt_name") or ""),
+                       item.get("receipt_bytes")) if org_id else "",
+    ]
+    freed = 0
+    for key in keys:
+        if key:
+            release(key, submission_id)
+            freed += 1
+    logger.info("released %d fingerprints held by %s", freed, submission_id)
+    return freed
