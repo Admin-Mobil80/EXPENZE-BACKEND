@@ -2402,6 +2402,10 @@ def _submission_view(row: dict[str, Any], budget_currency: str = "") -> dict[str
         # for the verdict and dispatched to nobody - so a reviewer read a
         # paragraph the person had never seen.
         "last_notice": row.get("last_notice") or {},
+        # The claim this is a second document of, if it is one. An invoice and
+        # its receipt arrive in one email; both become claims; only one of them
+        # is a claim.
+        "companion_of": row.get("companion_of", ""),
     }
 
 

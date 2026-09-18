@@ -125,15 +125,27 @@ def _stated(value: Any) -> Optional[Decimal]:
     return total if total > 0 else None
 
 
-def _money(value: Any, field: str) -> Decimal:
-    """Coerce to a 2dp Decimal, refusing floats-as-money surprises."""
+def _money(value: Any, field: str, *, signed: bool = False) -> Decimal:
+    """Coerce to a 2dp Decimal, refusing floats-as-money surprises.
+
+    `signed` where a minus is a real thing the paper can say. A line item is
+    such a place: invoices carry discounts, credits, proration adjustments and
+    returned items as negative lines, and they are part of what the bill comes
+    to. Refusing them threw out the whole claim - a Claude subscription invoice
+    with one discount line failed three audits and was parked for a human, for
+    printing something entirely ordinary.
+
+    A cap is not such a place. A rule saying somebody may spend minus fifty is
+    not a rule anybody meant to write, and taking it at face value would
+    approve every claim of that type in silence.
+    """
     try:
         amount = Decimal(str(value))
     except (InvalidOperation, TypeError):
         raise PolicyInputError(f"{field}: {value!r} is not a valid amount")
     if amount.is_nan() or amount.is_infinite():
         raise PolicyInputError(f"{field}: {value!r} is not a finite amount")
-    if amount < 0:
+    if amount < 0 and not signed:
         raise PolicyInputError(f"{field}: amount may not be negative")
     return amount.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
 
@@ -359,7 +371,8 @@ def evaluate_policy(
     receipt_total = Decimal("0.00")
     for index, raw in enumerate(line_items):
         description = str(raw.get("description", "")).strip() or f"line {index + 1}"
-        amount = _money(raw.get("amount", 0), f"line_items[{index}].amount")
+        amount = _money(raw.get("amount", 0), f"line_items[{index}].amount",
+                        signed=True)
         receipt_total += amount
         # A line is what it says it is and what it cost. Nothing else here
         # decides money, so nothing else here is kept.
@@ -380,6 +393,26 @@ def evaluate_policy(
     printed = _stated(stated_total)
     if printed is not None:
         receipt_total = printed
+
+    # A bill cannot come to less than nothing.
+    #
+    # Lines may be negative one at a time; their sum may not. A total below
+    # zero means the reading is wrong - a credit note read as an invoice, a
+    # minus sign hallucinated onto the largest line - and paying out against
+    # it, or capping against it, would both be arithmetic on a fiction. The
+    # claim is worth nothing and goes to a person.
+    if receipt_total < 0:
+        violations.append({
+            "code": "negative_total",
+            "message": (
+                f"The lines add up to {receipt_total}, which is less than "
+                "nothing. The receipt has been misread, or it is a credit "
+                "note rather than a bill. A reviewer should look at it."
+            ),
+            "amount": None,
+            "blocks_automatic_decision": True,
+        })
+        receipt_total = Decimal("0.00")
 
     # ---- the cap ----------------------------------------------------------
     #

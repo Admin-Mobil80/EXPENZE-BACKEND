@@ -1,0 +1,121 @@
+"""An invoice and its receipt are one claim, not two.
+
+A vendor sends both; the employee forwards the lot; every attachment becomes a
+submission. So one Claude subscription charge produced two claims - one
+approved, one flagged `possible_duplicate` and put in front of a person to
+confirm what the paper already proved - and cost two credits.
+
+`possible_duplicate` is the right answer in general: two people can buy the
+same coffee at the same shop for the same price on the same morning, and only
+a human can tell that from one bill claimed twice. It is the wrong answer when
+both arrived **in one email**, from one sender, carrying one invoice number.
+There is no judgment left, so nobody is asked to make one.
+
+The companion is not rejected - nothing about it is wrong, and the document is
+evidence somebody may want. It is simply not a second thing to decide or to
+pay, and the credit it cost goes back.
+"""
+from __future__ import annotations
+
+import os
+import unittest
+
+ROOT = os.path.join(os.path.dirname(__file__), "..")
+
+
+def src(*parts: str) -> str:
+    with open(os.path.join(ROOT, *parts), encoding="utf-8") as fh:
+        return fh.read()
+
+
+class ArrivingTogetherIsWhatSettlesIt(unittest.TestCase):
+
+    def setUp(self):
+        self.worker = src("lambda_src", "auditor_worker.py")
+
+    def test_the_delivery_key_is_what_is_compared(self):
+        self.assertIn('source_ref = str(row.get("source_ref", "") or "")', self.worker)
+        self.assertIn("same_message = bool(source_ref) and held "
+                      "and _source_ref_of(held) == source_ref", self.worker)
+
+    def test_two_claims_with_no_source_are_not_companions(self):
+        # Empty must never compare equal to empty, or every WhatsApp claim
+        # becomes a companion of the first one that matches it.
+        fn = self.worker.split("def _source_ref_of(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("must never", fn)
+        self.assertIn("bool(source_ref) and", self.worker)
+
+    def test_a_match_from_a_different_delivery_is_still_a_question(self):
+        # The same bill sent twice on different days, or by two people, is
+        # exactly what possible_duplicate is for.
+        self.assertIn("elif held:", self.worker)
+        self.assertIn('"code": "possible_duplicate"', self.worker)
+
+
+class TheCompanionCostsNothingAndSaysNothing(unittest.TestCase):
+
+    def setUp(self):
+        self.worker = src("lambda_src", "auditor_worker.py")
+
+    def test_the_credit_goes_back(self):
+        self.assertIn("_refund_one_credit(org_id, submission_id, companion_of)",
+                      self.worker)
+        fn = self.worker.split("def _refund_one_credit(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("credits = if_not_exists(credits, :z) + :one", fn)
+
+    def test_it_is_refunded_once_not_once_per_audit(self):
+        # A claim can be read again - a reviewer corrects its type, a fault is
+        # fixed and it is re-driven - and a refund that fires on every pass
+        # mints credits out of a retry.
+        self.assertIn('if not str(row.get("companion_of") or ""):', self.worker)
+
+    def test_the_worker_may_actually_write_the_refund(self):
+        # It had read-only on the organisations table, so every refund was
+        # denied - quietly, as designed, but denied.
+        stack = src("expensifyai", "stack.py")
+        self.assertIn("orgs_table.grant_read_write_data(auditor_worker)", stack)
+
+    def test_refunding_can_never_fail_the_audit(self):
+        fn = self.worker.split("def _refund_one_credit(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("except Exception:", fn)
+
+    def test_the_sender_is_told_once_not_twice(self):
+        # One purchase, one outcome message. The original's already went.
+        self.assertIn('if verdict.get("companion_of"):', self.worker)
+        block = self.worker.split('if verdict.get("companion_of"):', 1)[1].split("\n\n", 1)[0]
+        self.assertIn("already sent", block)
+
+    def test_it_is_written_onto_the_claim(self):
+        self.assertIn("companion_of = :co", self.worker)
+        view = src("lambda_src", "auth.py").split("def _submission_view(", 1)[1] \
+                                           .split("\ndef ", 1)[0]
+        self.assertIn('"companion_of"', view)
+
+
+class ItIsNotAThingToDecideOrToPay(unittest.TestCase):
+
+    def setUp(self):
+        self.app = src("..", "PORTAL", "app.html")
+
+    def test_the_console_reads_it_back(self):
+        self.assertIn("companionOf: s.companion_of", self.app)
+        self.assertIn("const isCompanion = (sub) => !!sub.companionOf;", self.app)
+
+    def test_it_is_out_of_the_review_queue(self):
+        queued = self.app.split("const isQueued = (sub) => {", 1)[1].split("\n};", 1)[0]
+        self.assertIn("if (isCompanion(sub)) return false;", queued)
+
+    def test_and_out_of_the_payment_run(self):
+        payable = self.app.split("function payableClaims(", 1)[1].split("\nfunction ", 1)[0]
+        self.assertIn("if (isCompanion(sub)) return;", payable)
+
+    def test_but_not_hidden_and_not_rejected(self):
+        # The document is evidence and its reference still resolves. Opening it
+        # explains itself rather than showing an approved-looking claim with no
+        # controls and no reason.
+        self.assertIn("second_document", self.app)
+        self.assertIn("the credit for this one was returned", self.app)
+
+
+if __name__ == "__main__":
+    unittest.main()

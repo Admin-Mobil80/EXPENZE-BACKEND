@@ -194,6 +194,37 @@ def _reference_of(submission_id: str) -> str:
     return str(_other_claim(submission_id).get("reference") or "")
 
 
+def _source_ref_of(submission_id: str) -> str:
+    """Which delivery a claim arrived on - one email is one `mail://` key.
+
+    Empty for anything that arrived without siblings, and empty must never
+    compare equal to empty: two claims with no source are not companions.
+    """
+    return str(_other_claim(submission_id).get("source_ref") or "")
+
+
+def _refund_one_credit(org_id: str, submission_id: str, companion_of: str) -> None:
+    """Give back the credit a second document of one claim cost.
+
+    One receipt, one credit - and two attachments describing one purchase are
+    one receipt. Never raises: the claim is audited and correct by the time
+    this runs, and losing that because a counter would not increment is the
+    worse trade.
+    """
+    if not (_orgs and org_id):
+        return
+    try:
+        _orgs.update_item(
+            Key={"org_id": org_id},
+            UpdateExpression="SET credits = if_not_exists(credits, :z) + :one",
+            ExpressionAttributeValues={":z": 0, ":one": 1},
+        )
+        logger.info("refunded the credit for %s, a second document of %s",
+                    submission_id, companion_of)
+    except Exception:
+        logger.exception("could not refund the credit for %s", submission_id)
+
+
 def _describe(submission_id: str) -> str:
     """`Mobil80-Exp-1, sent by manoj@mobil80.com` - something to go and find.
 
@@ -227,6 +258,10 @@ def _audit_one(row: dict[str, Any]) -> None:
     submission_id = str(row.get("submission_id", ""))
     key = str(row.get("receipt_key", ""))
     org_id = str(row.get("org_id", ""))
+    # Which delivery this arrived on. Every attachment of one email carries the
+    # same key, which is what tells two documents of one purchase apart from
+    # two people claiming the same bill.
+    source_ref = str(row.get("source_ref", "") or "")
 
     if not submission_id:
         return
@@ -336,7 +371,37 @@ def _audit_one(row: dict[str, Any]) -> None:
             held = duplicates.claim(fingerprint, submission_id)
         if not held and shape_fp:
             held = duplicates.claim(shape_fp, submission_id)
-        if held:
+        # Two documents of one purchase, or two claims?
+        #
+        # An invoice and its receipt arrive in one email all the time - the
+        # vendor sends both, the employee forwards the lot. Each attachment
+        # becomes a claim, so one subscription charge became two: one approved,
+        # one flagged as a possible duplicate and put in front of a person to
+        # confirm what the paper already proves.
+        #
+        # Arriving in the same message is what settles it. `possible_duplicate`
+        # is evidence for a human because two people can buy the same coffee at
+        # the same shop for the same price on the same morning - but not in one
+        # email, from one sender, carrying one invoice number. There is no
+        # judgment left to make, so nobody is asked to make it.
+        #
+        # The companion is not rejected: nothing about it is wrong. It stays as
+        # the second document of the claim it belongs to, out of the queue and
+        # out of the payment run, and the credit it cost goes back.
+        same_message = bool(source_ref) and held and _source_ref_of(held) == source_ref
+        if same_message:
+            companion_of = _reference_of(held) or held
+            verdict["companion_of"] = companion_of
+            logger.info("%s is a second document of %s, from the same message",
+                        submission_id, companion_of)
+            # Once, not once per audit. A claim can be read again - a
+            # reviewer corrects its type, a fault is fixed and it is re-driven
+            # - and a refund that fires on every pass mints credits out of a
+            # retry. Already being a companion is the record that it was paid
+            # back the first time.
+            if not str(row.get("companion_of") or ""):
+                _refund_one_credit(org_id, submission_id, companion_of)
+        elif held:
             # Named the way a person can act on. This quoted the raw
             # `sub_1789477019786_595007`, which is the identifier the whole
             # reference scheme exists because nobody can use: a reviewer told
@@ -413,11 +478,14 @@ def _audit_one(row: dict[str, Any]) -> None:
                               "rationale = :n, currency_resolution = :c, "
                               "audited_at = :t, model = :m, fingerprint = :f, "
                               "budget_value = :bv, sender_fingerprint = :sf, "
-                              "payout_value = :pv, "
+                              "payout_value = :pv, companion_of = :co, "
                               "group_id = :g, group_status = :gs REMOVE last_error"),
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
                 ":s": "audited",
+                # The claim this is a second document of, or empty. Read by the
+                # console to keep it out of the queue and the payment run.
+                ":co": verdict.get("companion_of", ""),
                 ":g": group_id,
                 ":gs": group_status,
                 # What this claim counts as against a budget kept in the
@@ -458,7 +526,11 @@ def _audit_one(row: dict[str, Any]) -> None:
         # receipt at all - and the first message a submitter ever gets about a
         # claim was therefore addressed to "your receipt" rather than naming
         # the vendor printed on it.
-        _tell_sender({**row, "receipt": receipt}, verdict)
+        if verdict.get("companion_of"):
+            logger.info("%s is a second document of %s; its outcome was already sent",
+                        submission_id, verdict["companion_of"])
+        else:
+            _tell_sender({**row, "receipt": receipt}, verdict)
     except Exception as exc:
         logger.exception("audit of %s failed", submission_id)
         _release(submission_id, f"{type(exc).__name__}: {exc}")

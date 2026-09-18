@@ -251,9 +251,32 @@ class MoneyIsHandledExactly(unittest.TestCase):
         v = decide(items=[item("A", 0.1), item("B", 0.2)])
         self.assertEqual("0.30", v["receipt_total"])
 
-    def test_a_negative_amount_is_refused_loudly(self):
+    def test_a_negative_line_is_ordinary(self):
+        # Invoices carry discounts, credits, proration and returned items as
+        # negative lines, and they are part of what the bill comes to.
+        # Refusing them threw out the whole claim: a Claude subscription
+        # invoice with one discount line failed three audits and was parked
+        # for a human, for printing something entirely unremarkable.
+        v = decide(items=[item("Pro plan", "100.00"), item("Discount", "-10.00")])
+        self.assertEqual("90.00", v["receipt_total"])
+        self.assertEqual("-10.00", v["line_items"][1]["amount"])
+
+    def test_but_a_negative_cap_is_still_refused(self):
+        # "You may spend minus fifty" is not a rule anybody meant to write, and
+        # taking it at face value would clear every claim of that type.
         with self.assertRaises(policy.PolicyInputError):
-            decide(items=[item("Refund", "-10.00")])
+            policy.normalise_rules({"version": 1, "expense_types": [
+                {"id": "meals", "label": "Meals", "enabled": True,
+                 "caps": {"per_transaction": {"INR": "-50.00"}}}]})
+
+    def test_and_a_bill_cannot_come_to_less_than_nothing(self):
+        # Lines may be negative one at a time; their sum may not. A total below
+        # zero is a misreading - a credit note taken for an invoice - and both
+        # paying against it and capping against it would be arithmetic on a
+        # fiction.
+        v = decide(items=[item("Thing", "10.00"), item("Credit", "-60.00")])
+        self.assertIn("negative_total", blocking(v))
+        self.assertEqual("0.00", v["receipt_total"])
 
     def test_the_verdict_is_json_serialisable(self):
         json.dumps(decide("830.00"))

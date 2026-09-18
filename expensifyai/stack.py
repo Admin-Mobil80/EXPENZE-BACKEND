@@ -771,7 +771,11 @@ class ExpensifyAIStack(Stack):
             )
         )
         receipts_bucket.grant_read(auditor_worker)
-        orgs_table.grant_read_data(auditor_worker)
+        # Write, not just read: the worker returns the credit for a second
+        # document of one purchase - an invoice and its receipt arriving in one
+        # email - and read-only meant that refund was denied every time. It
+        # failed quietly, as it should, but it failed.
+        orgs_table.grant_read_write_data(auditor_worker)
         table.grant_read_write_data(auditor_worker)
         api_key_secret.grant_read(auditor_worker)
 
