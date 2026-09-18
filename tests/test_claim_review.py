@@ -302,7 +302,11 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
                        encoding="utf-8").read()
         reaudit = handler.split("def reaudit(", 1)[1].split("\ndef ", 1)[0]
         self.assertIn('receipt["expense_type"] = expense_type', reaudit)
-        self.assertIn("_run_policy(receipt, currency)", reaudit)
+        # Against the organisation's own rules. Passing none fell back to the
+        # built-in set, so a type this company added read as uncovered however
+        # many times a reviewer pressed Re-check.
+        self.assertIn("_run_policy(receipt, currency, policy.rules_for(_org(org_id)))",
+                      reaudit)
 
     def test_the_console_withholds_approve_and_says_why(self):
         self.assertIn("const untagged = res.violations.some", self.app)
@@ -459,8 +463,14 @@ class ASettledClaimSaysSettled(unittest.TestCase):
         block = self.app.split('$("detail-route").textContent = stage', 1)[1] \
                         .split(";", 1)[0]
         self.assertIn("settledBy(sub)", block)
-        self.assertIn("decision.action", block)
+        self.assertIn("decision.by", block)
         self.assertIn("sent back by", block)
+        # The verdict itself moved one element along, into a tag beside this
+        # line, so that the one state meaning "nothing more to do here" does
+        # not look like every other route line. The sentence no longer repeats
+        # the word the tag carries.
+        tag = self.app.split("const tagWord = stage", 1)[1].split(";", 1)[0]
+        self.assertIn("decidedAs(decision.action)", tag)
 
     def test_no_label_can_contradict_the_claim_s_position_any_more(self):
         # The badge sat at the top of a claim in Pending settlement with
@@ -481,7 +491,9 @@ class ASettledClaimSaysSettled(unittest.TestCase):
         # by two people on two days, and this line sits directly above
         # "owed to Arjun" and a Record payment button.
         self.assertIn('const DECIDED_BY = { Approved: "Reviewed" };', self.app)
-        self.assertIn("`${decidedAs(decision.action)} by ${personName(decision.by)}",
+        # The tag says REVIEWED; the line beside it names who and when.
+        self.assertIn("decidedAs(decision.action).toUpperCase()", self.app)
+        self.assertIn("`by ${personName(decision.by)} \u00b7 ${decision.at}`",
                       self.app)
 
     def test_but_the_stored_action_keeps_the_server_s_word(self):

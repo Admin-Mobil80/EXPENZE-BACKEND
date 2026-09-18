@@ -299,11 +299,14 @@ class ClaimRowsOpenTheClaim(unittest.TestCase):
             self.source = handle.read()
 
     def test_every_claim_table_marks_its_rows(self):
-        # Pending settlement, Settled, Rejected, and My expenses.
+        # Pending settlement, Settled, Rejected, and My expenses - plus the
+        # Rejected sub-tab of the Review queue, which lists the same claims
+        # where they were decided rather than under the tab about money that
+        # moved.
         calls = re.findall(r"^\s+opensClaim\(tr, ", self.source, re.M)
-        self.assertEqual(len(calls), 5,
-                         "Review queue, Pending settlement, Settled, Rejected "
-                         "and My expenses")
+        self.assertEqual(len(calls), 6,
+                         "Review queue and its Rejected tab, Pending "
+                         "settlement, Settled, Rejected and My expenses")
 
     def test_every_one_is_wired_after_its_rows_are_built(self):
         self.assertEqual(self.source.count("wireClaimRows(tb);"), 5)

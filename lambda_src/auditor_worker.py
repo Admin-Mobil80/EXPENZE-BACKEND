@@ -592,8 +592,11 @@ def _reaudit(submission_id: str, row: dict[str, Any], expense_type: str = "",
     currency = (currency_override
                 or (row.get("verdict") or {}).get("currency")
                 or (row.get("receipt") or {}).get("currency") or "")
+    # The organisation, so the claim is decided under its policy and not the
+    # built-in one. See `handler.reaudit`.
     outcome = handler.reaudit(row["receipt"], str(currency),
-                              expense_type=expense_type)
+                              expense_type=expense_type,
+                              org_id=str(row.get("org_id") or ""))
     _intake.update_item(
         Key={"submission_id": submission_id},
         UpdateExpression=("SET #s = :s, verdict = :v, receipt = :r, rationale = :n, "

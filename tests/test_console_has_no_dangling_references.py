@@ -77,7 +77,16 @@ class EveryFunctionTheConsoleCallsIsDefined(unittest.TestCase):
         local |= set(re.findall(r"\.([a-z_$][\w$]*)\s*\(", self.js))
         # Words inside string and template literals read as calls; a name that
         # appears nowhere but a literal is prose, not a reference.
-        literal = set(re.findall(r"[`\"'][^`\"'\n]*?\b([a-z_$][\w$]*)\s*\(", self.js))
+        #
+        # Every name in each literal, not only the first. This matched once per
+        # literal, so a second `name(` in the same string was still read as a
+        # call - which is how `img.style.transform = `translate(...)
+        # scale(...)`` reported `scale` as an undefined function: `translate`
+        # was matched, the scan resumed past it, and the CSS function after it
+        # was left looking like code. One span, then every name inside it.
+        literal = set()
+        for span in re.findall(r"`[^`]*`|\"[^\"\n]*\"|'[^'\n]*'", self.js):
+            literal |= set(re.findall(r"\b([a-z_$][\w$]*)\s*\(", span))
 
         missing = sorted(called - defined - local - literal - HOST)
         self.assertEqual([], missing,
