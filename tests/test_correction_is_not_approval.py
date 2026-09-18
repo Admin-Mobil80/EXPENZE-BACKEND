@@ -57,7 +57,7 @@ class TheCorrectionIsRecorded(unittest.TestCase):
     def test_only_a_reviewer_can_do_it(self):
         # The stamp means "a person with authority changed this", so the
         # authority check is part of what makes it meaningful.
-        self.assertIn('acting.get("role") not in ("owner", "finance")', self.retype)
+        self.assertIn('not runs_the_org(acting)', self.retype)
 
     def test_it_reaches_the_console(self):
         view = self.auth.split("def _submission_view(", 1)[1].split("\ndef ", 1)[0]

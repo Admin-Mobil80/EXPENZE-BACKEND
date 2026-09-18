@@ -145,6 +145,29 @@ def rank_of(member: Any) -> int:
     return RANK.get(str((member or {}).get("role") or "staff"), 0)
 
 
+def runs_the_org(who: Any) -> bool:
+    """Whether this person works on the organisation rather than only in it.
+
+    Every gate on the administration surface was written as the literal tuple
+    `("owner", "finance")` - policy rules, budgets, groups, people, the review
+    queue, settlement, reports, channels, the lot. That tuple was correct on
+    the day it was written, when those were the only roles above a submitter.
+
+    Administrators were added afterwards: a rank, a label, a role picker, a
+    rule about who may appoint whom. The gates were not revisited, so `admin`
+    matched none of them and an administrator - who *outranks* a finance
+    executive - could reach less of the product than the person below them and
+    no more than a submitter. Rana Ghosh signed in as an Administrator and the
+    console said SUBMITTER over his name, which was wrong about his role and
+    right about what the server would have let him do.
+
+    A rank comparison instead of a list, so the next role to be added is
+    placed by where it ranks rather than by remembering every gate it belongs
+    in. Finance is the floor: below it is somebody who only sends receipts.
+    """
+    return rank_of(who) >= RANK["finance"]
+
+
 def may_manage(actor_role: Any, target_role: Any) -> bool:
     """Whether somebody may act on a person holding this role.
 
@@ -337,8 +360,14 @@ def _invite(actor_token: str, body: dict[str, Any], origin: str | None) -> dict[
         return _reply(401, {"error": "Sign in to continue."}, origin)
 
     membership = identity.resolve_by_email(actor, channel=None)
-    if not membership or membership.get("role") not in ("owner", "finance"):
-        return _reply(403, {"error": "Only an owner or finance executive can invite people."}, origin)
+    # Ranked, not listed. The literal tuple here was ("owner", "finance"),
+    # written before administrators existed as a role - so an administrator,
+    # who outranks a finance executive, was refused permission to invite
+    # anybody at all while the person below them could. Which role they may
+    # hand out is a separate question, and `may_manage` below answers it.
+    if not membership or rank_of(membership) < RANK["finance"]:
+        return _reply(403, {"error": "Only an owner, administrator or finance "
+                                     "executive can invite people."}, origin)
 
     email = str(body.get("email", "")).strip().lower()
     if not EMAIL_RE.match(email):
@@ -757,7 +786,7 @@ def _org_get(token: str, origin: str | None) -> dict[str, Any]:
         "rules": policy.rules_for(org),
         "rules_changelog": [h for h in (org.get("rules_changelog") or [])
                             if isinstance(h, dict)][:50],
-        "can_edit": org["_role"] in ("owner", "finance"),
+        "can_edit": runs_the_org(org["_role"]),
     }, origin)
 
 
@@ -847,8 +876,8 @@ def _budgets_put(token: str, body: dict[str, Any], origin: str | None) -> dict[s
     org = _org_of(actor)
     if not org:
         return _reply(403, {"error": "No organisation for this account."}, origin)
-    if org["_role"] not in ("owner", "finance"):
-        return _reply(403, {"error": "Only an owner or finance executive can set budgets."}, origin)
+    if not runs_the_org(org["_role"]):
+        return _reply(403, {"error": "Only an owner, administrator or finance executive can set budgets."}, origin)
 
     try:
         cleaned = budget_rules.normalise(body.get("budgets"), money.default_for_org(org))
@@ -877,8 +906,8 @@ def _org_put(token: str, body: dict[str, Any], origin: str | None) -> dict[str, 
     org = _org_of(actor)
     if not org:
         return _reply(403, {"error": "No organisation for this account."}, origin)
-    if org["_role"] not in ("owner", "finance"):
-        return _reply(403, {"error": "Only an owner or finance executive can change these."}, origin)
+    if not runs_the_org(org["_role"]):
+        return _reply(403, {"error": "Only an owner, administrator or finance executive can change these."}, origin)
 
     address = _address_from(body.get("address") or {}, org.get("address") or {})
     if address["country"] and address["country"] not in COUNTRIES:
@@ -937,8 +966,8 @@ def _groups_put(token: str, body: dict[str, Any], origin: str | None) -> dict[st
     if not actor:
         return _reply(401, {"error": "Sign in to continue."}, origin)
     org = _org_of(actor)
-    if not org or org["_role"] not in ("owner", "finance"):
-        return _reply(403, {"error": "Only an owner or finance executive can manage groups."}, origin)
+    if not org or not runs_the_org(org["_role"]):
+        return _reply(403, {"error": "Only an owner, administrator or finance executive can manage groups."}, origin)
 
     current_rev = int(org.get("groups_rev") or 0)
     sent_rev = body.get("rev")
@@ -1202,8 +1231,8 @@ def _member_groups(token: str, body: dict[str, Any], origin: str | None) -> dict
     if not actor:
         return _reply(401, {"error": "Sign in to continue."}, origin)
     org = _org_of(actor)
-    if not org or org["_role"] not in ("owner", "finance"):
-        return _reply(403, {"error": "Only an owner or finance executive can assign groups."}, origin)
+    if not org or not runs_the_org(org["_role"]):
+        return _reply(403, {"error": "Only an owner, administrator or finance executive can assign groups."}, origin)
 
     target = str(body.get("email", "")).strip().lower()
     if not EMAIL_RE.match(target):
@@ -1307,8 +1336,8 @@ def _member_update(token: str, body: dict[str, Any], origin: str | None) -> dict
     if not actor:
         return _reply(401, {"error": "Sign in to continue."}, origin)
     org = _org_of(actor)
-    if not org or org["_role"] not in ("owner", "finance"):
-        return _reply(403, {"error": "Only an owner or finance executive can administer people."}, origin)
+    if not org or not runs_the_org(org["_role"]):
+        return _reply(403, {"error": "Only an owner, administrator or finance executive can administer people."}, origin)
 
     target = str(body.get("email", "")).strip().lower()
     if not EMAIL_RE.match(target):
@@ -1472,7 +1501,7 @@ def _may_see(membership: dict[str, Any], submission: dict[str, Any]) -> bool:
     if not org_id or submission.get("org_id") != org_id:
         return False
 
-    if membership.get("role", "staff") in ("owner", "finance"):
+    if runs_the_org(membership):
         return True
 
     actor = membership.get("email")
@@ -1612,9 +1641,9 @@ def _claim_retype(token: str, body: dict[str, Any], origin: str | None) -> dict[
     if not acting:
         return _reply(403, {"error": "No membership for this account."}, origin)
     # Re-tagging changes what a claim is worth, so it is a reviewer's act.
-    if acting.get("role") not in ("owner", "finance"):
+    if not runs_the_org(acting):
         return _reply(403, {
-            "error": "Only an owner or finance executive can set the expense type."}, origin)
+            "error": "Only an owner, administrator or finance executive can set the expense type."}, origin)
 
     # The organisation's own types, not the built-ins. Now that a policy is
     # stored per account, checking against `DEFAULT_RULES` would refuse a type
@@ -1835,9 +1864,9 @@ def _claim_review(token: str, body: dict[str, Any], origin: str | None) -> dict[
     if action not in REVIEW_ACTIONS + CLAIMANT_ACTIONS:
         return _reply(400, {"error": "Say what is being done to this claim."}, origin)
 
-    if action in REVIEW_ACTIONS and acting.get("role") not in ("owner", "finance"):
+    if action in REVIEW_ACTIONS and not runs_the_org(acting):
         return _reply(403, {
-            "error": "Only an owner or finance executive can decide a claim."
+            "error": "Only an owner, administrator or finance executive can decide a claim."
         }, origin)
 
     # A rejection and a question are both useless to the employee without the
@@ -2092,9 +2121,9 @@ def _claim_outcome(token: str, body: dict[str, Any], origin: str | None) -> dict
         return _reply(401, {"error": "Sign in to continue."}, origin)
 
     acting = identity.resolve_by_email(actor, channel=None)
-    if not acting or acting.get("role") not in ("owner", "finance"):
+    if not acting or not runs_the_org(acting):
         return _reply(403, {
-            "error": "Only an owner or finance executive can settle or reject a claim."
+            "error": "Only an owner, administrator or finance executive can settle or reject a claim."
         }, origin)
 
     kind = str(body.get("kind", "")).strip().lower()
@@ -2208,6 +2237,12 @@ def _credits_order(token: str, body: dict[str, Any], origin: str | None) -> dict
     org = _org_of(actor)
     if not org:
         return _reply(403, {"error": "No organisation for this account."}, origin)
+    # Deliberately a list and not `runs_the_org`, which is what every other
+    # gate here became. Spending the company's money is not part of running
+    # the organisation's settings, and widening the administration surface to
+    # administrators is not a reason to hand them the card. The console offers
+    # this to the owner alone; this is the wider of the two on purpose,
+    # because finance could already do it.
     if org["_role"] not in ("owner", "finance"):
         return _reply(403, {"error": "Only an owner or finance executive can buy credits."}, origin)
 
@@ -2305,7 +2340,7 @@ def _submissions_list(token: str, body: dict[str, Any], origin: str | None) -> d
 
     org_id = me.get("org_id", "")
     rows = _submissions_tbl_scan(org_id)
-    everyone = me.get("role", "staff") in ("owner", "finance")
+    everyone = runs_the_org(me)
     if not everyone:
         rows = [r for r in rows if r.get("submitted_by") == actor]
 
@@ -2504,8 +2539,8 @@ def _people(token: str, body: dict[str, Any], origin: str | None) -> dict[str, A
     me = identity.resolve_by_email(actor, channel=None)
     if not me:
         return _reply(403, {"error": "No membership for this account."}, origin)
-    if me.get("role", "staff") not in ("owner", "finance"):
-        return _reply(403, {"error": "Only an owner or finance executive can see the team."}, origin)
+    if not runs_the_org(me):
+        return _reply(403, {"error": "Only an owner, administrator or finance executive can see the team."}, origin)
 
     org_id = me.get("org_id", "")
     rows, kwargs = [], {
@@ -2583,9 +2618,9 @@ def _audit_log(token: str, body: dict[str, Any], origin: str | None) -> dict[str
     acting = identity.resolve_by_email(actor, channel=None)
     if not acting:
         return _reply(403, {"error": "No membership for this account."}, origin)
-    if acting.get("role") not in ("owner", "finance"):
+    if not runs_the_org(acting):
         return _reply(403, {
-            "error": "Only an owner or finance executive can read the audit log."}, origin)
+            "error": "Only an owner, administrator or finance executive can read the audit log."}, origin)
 
     # One claim's history, for the panel on the claim page. Scoped to the
     # organisation inside `audit.history`, and the claim is confirmed to be

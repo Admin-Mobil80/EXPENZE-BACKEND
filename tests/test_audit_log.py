@@ -308,7 +308,7 @@ class TheDecisionsThatUsedToVanish(unittest.TestCase):
 
     def test_the_log_is_not_readable_by_the_people_it_is_about(self):
         reader = self._handler("_audit_log")
-        self.assertIn('acting.get("role") not in ("owner", "finance")', reader)
+        self.assertIn('not runs_the_org(acting)', reader)
 
 
 class TheConsoleShowsIt(unittest.TestCase):

@@ -731,7 +731,12 @@ class TwoSurfacesNotElevenTabs(unittest.TestCase):
     def test_the_switch_is_named_for_the_role(self):
         # A Finance Executive does not administer the organisation and an owner
         # does more than finance; one generic word serves neither.
-        self.assertIn('ROLE_SURFACE = { owner: "Administration", finance: "Finance" }', self.source)
+        self.assertIn('owner: "Administration"', self.source)
+        self.assertIn('finance: "Finance"', self.source)
+        # An administrator administers the organisation - that is the word for
+        # it. Missing here, they fell through to the generic "Manage", the
+        # same omission that made the sign-in demote them to a submitter.
+        self.assertIn('admin: "Administration"', self.source)
 
     def test_switching_back_returns_where_you_were(self):
         self.assertIn("lastManageView", self.nav)

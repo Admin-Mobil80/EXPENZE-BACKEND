@@ -64,7 +64,7 @@ class TheEndpointExists(unittest.TestCase):
 
     def test_only_an_owner_or_finance_may_decide(self):
         body = self.auth.split("def _claim_review(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn('("owner", "finance")', body)
+        self.assertIn('not runs_the_org(acting)', body)
 
     def test_an_approval_needs_none(self):
         # Nothing is being asked of the employee, so demanding a sentence from
@@ -118,7 +118,7 @@ class WithdrawingYourOwnClaim(unittest.TestCase):
 
     def test_the_reviewer_gate_applies_only_to_reviewer_actions(self):
         # Otherwise an ordinary member of staff cannot withdraw anything.
-        self.assertIn('action in REVIEW_ACTIONS and acting.get("role") not in ("owner", "finance")',
+        self.assertIn('action in REVIEW_ACTIONS and not runs_the_org(acting)',
                       self.body)
 
     def test_only_the_person_who_submitted_it_may_withdraw_it(self):
@@ -284,7 +284,7 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
 
     def test_only_a_reviewer_may_set_it(self):
         # Re-tagging changes what a claim is worth.
-        self.assertIn('acting.get("role") not in ("owner", "finance")', self.retype)
+        self.assertIn('not runs_the_org(acting)', self.retype)
 
     def test_an_invented_type_is_refused(self):
         self.assertIn("Choose one of the configured expense types.", self.retype)
