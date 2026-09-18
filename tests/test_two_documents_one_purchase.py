@@ -33,10 +33,31 @@ class ArrivingTogetherIsWhatSettlesIt(unittest.TestCase):
     def setUp(self):
         self.worker = src("lambda_src", "auditor_worker.py")
 
-    def test_the_delivery_key_is_what_is_compared(self):
+    def test_both_the_delivery_and_the_invoice_number_must_agree(self):
+        # Arriving together is necessary and nowhere near sufficient. Ten
+        # receipts in one email is ordinary, and two of them can honestly be
+        # the same amount at the same shop on the same day.
         self.assertIn('source_ref = str(row.get("source_ref", "") or "")', self.worker)
-        self.assertIn("same_message = bool(source_ref) and held "
-                      "and _source_ref_of(held) == source_ref", self.worker)
+        self.assertIn("same_message = bool(source_ref) and bool(this_invoice) and held", self.worker)
+        self.assertIn("_invoice_of(held) == this_invoice", self.worker)
+
+    def test_a_bill_with_no_invoice_number_is_never_absorbed(self):
+        # It proves nothing about another bill that also has none.
+        fn = self.worker.split("def taxlike(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("empty never equals empty", fn)
+        self.assertIn("bool(this_invoice)", self.worker)
+
+    def test_the_number_is_compared_the_way_a_person_would(self):
+        # "4000 - 438350" and "4000-438350" are one number.
+        fn = self.worker.split("def taxlike(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("ch.isalnum()", fn)
+        self.assertIn(".upper()", fn)
+
+    def test_asking_which_fingerprint_matched_would_answer_the_weak_one(self):
+        # `submitter_key` is tried first and is a guess: two colleagues each
+        # holding a seat of the same product match it. So the documents are
+        # compared directly rather than the keys.
+        self.assertNotIn("matched_on", self.worker)
 
     def test_two_claims_with_no_source_are_not_companions(self):
         # Empty must never compare equal to empty, or every WhatsApp claim

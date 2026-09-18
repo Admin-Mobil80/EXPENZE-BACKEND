@@ -194,6 +194,21 @@ def _reference_of(submission_id: str) -> str:
     return str(_other_claim(submission_id).get("reference") or "")
 
 
+def taxlike(value: Any) -> str:
+    """An invoice number reduced to what identifies it.
+
+    `4000 - 438350` and `4000-438350` are one number; so are `AD2NTG1F-0004`
+    and `ad2ntg1f 0004`. Empty stays empty, and empty never equals empty: a
+    bill with no number proves nothing about another bill with no number.
+    """
+    return "".join(ch for ch in str(value or "") if ch.isalnum()).upper()
+
+
+def _invoice_of(submission_id: str) -> str:
+    """The invoice number a claim was read as carrying, normalised."""
+    return taxlike((_other_claim(submission_id).get("receipt") or {}).get("invoice_number"))
+
+
 def _source_ref_of(submission_id: str) -> str:
     """Which delivery a claim arrived on - one email is one `mail://` key.
 
@@ -388,7 +403,25 @@ def _audit_one(row: dict[str, Any]) -> None:
         # The companion is not rejected: nothing about it is wrong. It stays as
         # the second document of the claim it belongs to, out of the queue and
         # out of the payment run, and the credit it cost goes back.
-        same_message = bool(source_ref) and held and _source_ref_of(held) == source_ref
+        # Arriving together is necessary and nowhere near sufficient.
+        #
+        # Ten receipts in one email is an ordinary thing to send, and two of
+        # them can honestly be the same amount at the same shop on the same
+        # day. That is all `submitter_key` knows - and it is tried first, so
+        # asking *which* fingerprint matched would answer "the weak one" even
+        # when the invoice numbers agree. Absorbing a second claim on that
+        # evidence would destroy a real one and hand back a credit for it with
+        # nobody asked.
+        #
+        # So the documents are compared directly. One invoice number is one
+        # document, whichever key happened to catch it: a vendor does not
+        # issue two invoices under one number, and two separate purchases do
+        # not share one. A bill with no invoice number proves nothing and is
+        # left to a person.
+        this_invoice = taxlike(receipt.get("invoice_number"))
+        same_message = bool(source_ref) and bool(this_invoice) and held and (
+            _source_ref_of(held) == source_ref
+            and _invoice_of(held) == this_invoice)
         if same_message:
             companion_of = _reference_of(held) or held
             verdict["companion_of"] = companion_of
