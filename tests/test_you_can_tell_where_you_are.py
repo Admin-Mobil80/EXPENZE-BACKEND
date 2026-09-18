@@ -159,5 +159,42 @@ class ApprovingDoesNotHandYouAPaymentRun(unittest.TestCase):
         self.assertIn('no.textContent = "Reject"', actions)
 
 
+class OneClassNameOneMeaning(unittest.TestCase):
+    """A new spinner took a class name the header was already using.
+
+    `.spin` is the refresh glyph beside "just now" - a static U+21BB that the
+    class only sizes. Adding `.spin { animation: spin .8s linear infinite }`
+    for a busy indicator elsewhere set that arrow turning on every page of the
+    console, for ever, while nothing was loading. A spinner that never stops
+    is the product telling everybody it is stuck, and it was on the one
+    element every screen shows.
+
+    The rule is not "check before naming" - it is that a class which paints
+    one specific thing gets a name nothing else would reach for.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.css = self.app.split("<style>", 1)[1].rsplit("</style>", 1)[0]
+
+    def test_the_header_glyph_is_not_animated(self):
+        for rule in self.css.split("}"):
+            if ".spin" in rule.split("{", 1)[0] and ".busydot" not in rule:
+                self.assertNotIn("animation", rule, rule.strip()[:120])
+
+    def test_the_busy_indicator_has_a_name_of_its_own(self):
+        self.assertIn(".busydot {", self.css)
+        self.assertIn("@keyframes busyspin", self.css)
+        self.assertIn('dot.className = "busydot";', self.app)
+
+    def test_and_its_keyframes_are_its_own_too(self):
+        # `@keyframes spin` would be reachable by any future `.spin` rule.
+        self.assertNotIn("@keyframes spin ", self.css)
+
+    def test_reduced_motion_still_stops_it(self):
+        block = self.css.split("@media (prefers-reduced-motion: reduce) {", 1)[1]
+        self.assertIn(".busydot { animation:none;", block[:400])
+
+
 if __name__ == "__main__":
     unittest.main()
