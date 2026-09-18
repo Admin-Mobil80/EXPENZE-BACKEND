@@ -2781,7 +2781,10 @@ class ASettledClaimIsDeadInEveryControl(unittest.TestCase):
                               .split("\nfunction ", 1)[0]
 
     def test_every_reason_sits_in_one_expression(self):
-        self.assertIn("const frozen = paid || unread || !reviewingHere();",
+        # Plus `rechecking`: while the agent has the claim back, the type,
+        # the currency and the group are about to be re-judged, so they are
+        # not editable either.
+        self.assertIn("const frozen = paid || unread || rechecking || !reviewingHere();",
                       self.detail)
 
     def test_the_four_controls_are_assigned_exactly_once(self):

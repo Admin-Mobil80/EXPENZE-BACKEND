@@ -425,7 +425,7 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
         # second pass that assigns to the same controls writes `false` back
         # over it, which is how a settled claim came to offer an editable
         # Expense type again.
-        self.assertIn("paid || unread || !reviewingHere()", frozen)
+        self.assertIn("paid || unread || rechecking || !reviewingHere()", frozen)
 
     def test_the_route_is_wired(self):
         with open(os.path.join(ROOT, "expensifyai", "stack.py"), encoding="utf-8") as h:
