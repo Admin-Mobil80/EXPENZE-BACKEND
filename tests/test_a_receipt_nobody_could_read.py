@@ -200,5 +200,49 @@ class TheSubmitterIsNotQuotedAFigureNobodyRead(unittest.TestCase):
         self.assertIn('"violations": verdict.get("violations") or []', send)
 
 
+class ADecidedClaimIsNotMessagedAgain(unittest.TestCase):
+    """The guard asked the wrong question, and nearly caught me out.
+
+    `_tell_sender` refused to send twice by checking whether an *outcome*
+    notice had already gone. A claim that was rejected carries a notice of
+    kind `rejected`, not `outcome` - so auditing it again would have sent
+    "sent to your finance team to look at" to somebody already told their
+    claim was refused: a message contradicting the last one they received,
+    about a claim that is closed.
+
+    Nothing in the product requeues a decided claim, which is why this never
+    fired. It nearly fired by hand. A blurred receipt had been rejected with
+    "the receipt is illegible - please send a clearer photo", and re-running
+    the agent over it to pick up the new `nothing_read` finding would have
+    rewritten a decided record and messaged its submitter a second time.
+
+    A guard that holds only while nobody touches the table is not a guard.
+    """
+
+    def setUp(self):
+        self.worker = read("lambda_src/auditor_worker.py")
+        self.fn = self.worker.split("def _tell_sender(", 1)[1].split(
+            "\ndef ", 1)[0]
+
+    def test_a_reviewed_claim_stops_it(self):
+        self.assertIn(
+            'if str(row.get("review_action") or "") or str(row.get("outcome") or ""):',
+            self.fn)
+
+    def test_the_older_guard_is_still_there(self):
+        # Two different repeats: the same outcome twice, and an outcome after
+        # a decision. Neither implies the other.
+        self.assertIn('if str(told.get("kind") or "") == "outcome":', self.fn)
+
+    def test_both_run_before_anything_is_sent(self):
+        self.assertLess(self.fn.index('row.get("review_action")'),
+                        self.fn.index("notify.send("))
+
+    def test_an_undecided_claim_is_still_told(self):
+        # The whole point of the acknowledgement is that the outcome follows.
+        self.assertIn("notify.send(", self.fn)
+        self.assertIn('"outcome"', self.fn)
+
+
 if __name__ == "__main__":
     unittest.main()

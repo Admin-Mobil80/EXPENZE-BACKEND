@@ -603,6 +603,25 @@ def _tell_sender(row: dict[str, Any], verdict: dict[str, Any]) -> None:
                         row.get("submission_id"))
             return
 
+        # And never after a person has decided it.
+        #
+        # The guard above asks only "have we already sent an *outcome*", so a
+        # claim that was rejected or settled and then audited again would send
+        # "sent to your finance team to look at" to somebody who had already
+        # been told their claim was refused - a message contradicting the last
+        # one they got, about a claim that is closed.
+        #
+        # Nothing requeues a decided claim today, which is why this has never
+        # fired. It nearly did by hand: a blurred receipt was rejected with
+        # "the receipt is illegible - please send a clearer photo", and
+        # re-running the agent over it to pick up a newer finding would have
+        # messaged the submitter again. A guard that depends on no operator
+        # ever touching the table is not a guard.
+        if str(row.get("review_action") or "") or str(row.get("outcome") or ""):
+            logger.info("%s: already decided, so the sender is not told again",
+                        row.get("submission_id"))
+            return
+
         member = identity.resolve_by_email(str(row.get("submitted_by", "")), channel=None)
         if not member:
             return
