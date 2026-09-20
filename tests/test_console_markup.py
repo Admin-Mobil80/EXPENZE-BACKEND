@@ -2249,24 +2249,42 @@ class PolicyRulesAreRealNow(unittest.TestCase):
 
 
 class ThePaidColumnEarnsItsPlace(unittest.TestCase):
-    """Every claim on Pending settlement is awaiting reimbursement.
+    """Approved and Outstanding were two columns printing one figure.
 
-    So "Paid" was a column of dashes, taking width from the figures beside it
-    that do say something. It has something to say only when a claim has been
-    part paid, which the tiles above already count.
+    Every claim on Pending settlement is awaiting reimbursement in full -
+    nothing has been paid against it - so the two differ only on a claim
+    somebody has part paid, which is not something this product tracks. Three
+    right-aligned money columns, two of them identical on every row, on the
+    screen where finance reads figures.
+
+    One column, "Owed". The pair comes back, with Paid between them, only when
+    a part payment has made them genuinely different numbers.
     """
 
     def setUp(self):
         with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as handle:
             self.app = handle.read()
 
-    def test_the_column_appears_only_when_something_is_part_paid(self):
+    def test_the_split_appears_only_when_something_is_part_paid(self):
         self.assertIn("const anyPartPaid = part.length > 0;", self.app)
         self.assertIn("paidHead.hidden = !anyPartPaid", self.app)
-        self.assertIn("(anyPartPaid ? `<td class=\"amt\">", self.app)
+        self.assertIn("approvedHead.hidden = !anyPartPaid", self.app)
+
+    def test_approved_and_paid_appear_together_or_not_at_all(self):
+        # Without a part payment, Approved *is* Owed - showing one of the two
+        # would be half the removal.
+        self.assertIn('owedHead.textContent = anyPartPaid ? "Outstanding" : "Owed";',
+                      self.app)
+
+    def test_the_row_emits_one_figure_or_three(self):
+        row = self.app.split("// One figure, unless a part payment", 1)[1][:400]
+        self.assertIn("(anyPartPaid", row)
+        self.assertIn("fmt(c.approved, ccy)", row)
+        self.assertIn("fmt(c.paid, ccy)", row)
+        self.assertIn("fmt(c.outstanding, ccy)", row)
 
     def test_the_empty_row_spans_whichever_width_is_showing(self):
-        self.assertIn("anyPartPaid ? 9 : 8", self.app)
+        self.assertIn("anyPartPaid ? 9 : 7", self.app)
 
 
 class TheClaimActionsAreOneRow(unittest.TestCase):
@@ -4239,3 +4257,56 @@ class ARejectedClaimIsStillSomewhere(unittest.TestCase):
     def test_it_follows_the_period_the_tab_is_showing(self):
         self.assertIn("inSettledRange(sub)", self.fn)
         self.assertIn("Widen it above.", self.fn)
+
+class EachCostCentreHasItsOwnColour(unittest.TestCase):
+    """A column of identically-green chips.
+
+    Every group chip was `.state on`, so Pending settlement showed a column of
+    same-shaped, same-coloured words that had to be read one at a time - on
+    the screen where somebody is scanning for which budget a payment comes out
+    of.
+
+    Six tints, taken from the group's position in the organisation's own list.
+    A hash of the id was the first attempt, and it is what anyone reaches for
+    first: six buckets over arbitrary strings collide constantly, and this
+    account's own groups proved it in the first probe - `mobil80` and
+    `cocobble` landed on the same shade, which is worse than no colour on a
+    screen that exists to tell them apart.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as handle:
+            self.app = handle.read()
+        self.css = self.app.split("<style>", 1)[1].rsplit("</style>", 1)[0]
+
+    def test_the_tint_comes_from_the_position_in_the_list(self):
+        fn = self.app.split("function groupTint(id) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("const at = (ORG_PROFILE.groups || []).findIndex(g => g.id === id);",
+                      fn)
+        self.assertIn('if (at >= 0) return "g" + (at % 6);', fn)
+
+    def test_a_group_no_longer_on_the_list_still_gets_one(self):
+        # A claim from before a group was deleted. It has nothing left to be
+        # confused with, so a hash is fine there.
+        fn = self.app.split("function groupTint(id) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("h = (h * 31 + id.charCodeAt(i)) >>> 0;", fn)
+
+    def test_six_tints_are_defined_and_each_carries_its_own_ink(self):
+        for n in range(6):
+            self.assertIn(f".state.g{n} {{ background:var(--g{n}-bg); color:var(--g{n}); }}",
+                          self.css)
+
+    def test_they_are_defined_for_every_theme(self):
+        # A token defined only in the light block renders as nothing in dark.
+        for n in range(6):
+            self.assertEqual(3, self.css.count(f"--g{n}:"),
+                             f"--g{n} must be set in :root, the media query "
+                             f"and the [data-theme] block")
+
+    def test_the_chip_uses_it(self):
+        self.assertIn('`<span class="state ${groupTint(g.id)}">', self.app)
+
+    def test_an_unattributed_claim_is_still_visibly_not_a_group(self):
+        # "not set" is not a sixth colour; it is the absence of one.
+        self.assertIn('\'<span class="state off">not set</span>\'', self.app)
+
