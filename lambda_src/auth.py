@@ -71,6 +71,7 @@ ADMINS_TABLE = os.environ["ADMINS_TABLE"]
 INTAKE_TABLE = os.environ["INTAKE_TABLE"]
 SETTINGS_TABLE = os.environ.get("SETTINGS_TABLE", "")
 LEDGER_TABLE = os.environ.get("LEDGER_TABLE", "")
+ADVANCES_TABLE = os.environ.get("ADVANCES_TABLE", "")
 WA_SECRET_ARN = os.environ.get("WA_SECRET_ARN", "")
 ROOT_ADMIN_EMAIL = os.environ.get("ROOT_ADMIN_EMAIL", "").lower()
 SES_REGION = os.environ.get("SES_REGION", "us-east-1")
@@ -200,6 +201,7 @@ _admins = _ddb.Table(ADMINS_TABLE)
 _submissions = _ddb.Table(INTAKE_TABLE)
 _settings = _ddb.Table(SETTINGS_TABLE) if SETTINGS_TABLE else None
 _ledger = _ddb.Table(LEDGER_TABLE) if LEDGER_TABLE else None
+_advances = _ddb.Table(ADVANCES_TABLE) if ADVANCES_TABLE else None
 _ses = boto3.client("sesv2", region_name=SES_REGION)
 _secrets = boto3.client("secretsmanager")
 _session_key: bytes | None = None
@@ -711,6 +713,242 @@ def _billing_view(org: dict[str, Any]) -> dict[str, Any]:
             "per_receipt": str(Decimal(quote["total"]) / Decimal(max(1, int(slab.get("credits") or 1)))),
         })
     return {"currency": currency, "gst_percent": str(gst), "slabs": slabs}
+
+
+# ---------------------------------------------------------------------------
+# Cash advances - the float a handful of people hold and spend from
+# ---------------------------------------------------------------------------
+#
+# Housekeeping and the canteen are not bought on anybody's own card. A few
+# people are handed cash, they spend it through the month, and they submit the
+# receipts here like everybody else. What was missing was the other half of
+# that arrangement: how much of the company's money each of them is holding
+# right now.
+#
+# A float holder's claim reaches Pending settlement like anybody's. What is
+# different is the choice finance makes there, and it is a choice between two
+# genuinely different acts that the word "settle" hides:
+#
+# **From the float.** No money moves. They already spent the company's cash;
+# the settlement is the company accounting for it, so the advance is drawn
+# down by that amount. Finance replenishes by advancing more.
+#
+# **A separate payout.** An ordinary reimbursement - a bill too large for the
+# float, or one they paid personally. It must leave the float alone, or the
+# next replenishment is calculated against a balance that never moved.
+#
+# So:
+#
+#     still out with them = advanced - returned - settled from the float
+#
+# and the claims they have spent but which are not yet settled are reported
+# beside it rather than inside it. That gap is the honest thing to show: the
+# cash is gone from their hands and the advance has not yet been drawn down
+# for it, so the two figures answer different questions - what the company has
+# not accounted for, and what the holder is actually carrying.
+#
+# Append-only. A balance that is stored drifts from the events that produced
+# it, and the events are what somebody asks about when the money does not add
+# up. A correction is another row, never an edit.
+
+# What a movement can be. `advance` is cash out to the holder; `return` is cash
+# they hand back - leaving the role, or finance reducing a float that is larger
+# than the job needs.
+ADVANCE_KINDS = ("advance", "return")
+
+
+def _advance_record(token: str, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
+    """Log cash paid to a float holder, or handed back by one."""
+    actor = _identity_from_token(token)
+    if not actor:
+        return _reply(401, {"error": "Sign in to continue."}, origin)
+    acting = identity.resolve_by_email(actor, channel=None)
+    if not acting:
+        return _reply(403, {"error": "No membership for this account."}, origin)
+    # The same gate as recording a settlement: this is money leaving the
+    # company, and it is the same people who record money leaving the company.
+    if not runs_the_org(acting):
+        return _reply(403, {
+            "error": "Only an owner, administrator or finance executive can "
+                     "record an advance."}, origin)
+
+    org = _org_of(actor) or {}
+    org_id = str(org.get("org_id") or acting.get("org_id") or "")
+
+    email = str(body.get("holder", "")).strip().lower()
+    if not EMAIL_RE.match(email):
+        return _reply(400, {"error": "Say who the advance is for."}, origin)
+    holder = identity.resolve_by_email(email, channel=None)
+    if not holder or str(holder.get("org_id") or "") != org_id:
+        return _reply(404, {"error": "No such person in this organisation."}, origin)
+    # A float is cash in somebody's hands. Handing more to somebody whose
+    # access has been taken away is the one case worth refusing outright.
+    if str(holder.get("status") or "active") == "removed":
+        return _reply(409, {
+            "error": f"{holder.get('name') or email} is no longer on the roll. "
+                     "Record what they hand back, not more cash out."}, origin)
+
+    kind = str(body.get("kind", "advance")).strip().lower()
+    if kind not in ADVANCE_KINDS:
+        return _reply(400, {"error": "An advance is either paid out or handed back."},
+                      origin)
+
+    amount = _as_decimal(body.get("amount"))
+    if amount <= 0:
+        return _reply(400, {"error": "Enter the amount handed over."}, origin)
+
+    currency = money.normalise(str(body.get("currency", ""))) or money.default_for_org(org)
+    now = int(time.time())
+    row = {
+        "org_id": org_id,
+        # Milliseconds, because two advances recorded in one sitting must not
+        # collide on the sort key and silently overwrite each other.
+        "ts": int(time.time() * 1000),
+        "kind": kind,
+        "holder": email,
+        "holder_name": str(holder.get("name") or email),
+        "amount": str(amount),
+        "currency": currency,
+        "mode": str(body.get("mode", ""))[:40],
+        "reference": str(body.get("reference", ""))[:80],
+        "note": str(body.get("note", ""))[:300],
+        "by": actor,
+        "by_name": acting.get("name") or actor,
+        "at": now,
+    }
+    if _advances is None:
+        return _reply(503, {"error": "Advances are not configured."}, origin)
+    _advances.put_item(Item=row)
+
+    _logged(acting, actor,
+            "advance paid" if kind == "advance" else "advance returned",
+            None, detail=f"{email} {amount} {currency}"
+            + (f" · {row['mode']}" if row["mode"] else ""),
+            amount=str(amount), currency=currency, reason=row["note"])
+    logger.info("%s recorded a %s of %s %s for %s", actor, kind, amount, currency, email)
+    return _reply(200, {"status": kind, "holder": email, "amount": str(amount),
+                        "currency": currency, "ts": row["ts"]}, origin)
+
+
+def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
+    """Every float holder, what they hold, and the movements behind it.
+
+    The three components are returned separately and the balance with them.
+    Finance does not have to take one number on trust, and when it looks wrong
+    they can see which of the three is the surprise without opening a ledger.
+    """
+    actor = _identity_from_token(token)
+    if not actor:
+        return _reply(401, {"error": "Sign in to continue."}, origin)
+    acting = identity.resolve_by_email(actor, channel=None)
+    if not acting:
+        return _reply(403, {"error": "No membership for this account."}, origin)
+    if not runs_the_org(acting):
+        return _reply(403, {
+            "error": "Only an owner, administrator or finance executive can see "
+                     "the float."}, origin)
+
+    org = _org_of(actor) or {}
+    org_id = str(org.get("org_id") or acting.get("org_id") or "")
+    base = money.default_for_org(org)
+
+    rows = []
+    if _advances is not None:
+        rows = _advances.query(
+            KeyConditionExpression=Key("org_id").eq(org_id),
+            ScanIndexForward=False,
+        ).get("Items", [])
+
+    # Somebody holds a float because cash was handed to them, not because a
+    # box was ticked. Deriving it from the ledger means there is no flag to
+    # set, none to forget, and none that can disagree with the money.
+    holders: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        email = str(r.get("holder") or "").lower()
+        if not email:
+            continue
+        who = holders.setdefault(email, {
+            "email": email, "name": str(r.get("holder_name") or email),
+            "advanced": Decimal("0"), "returned": Decimal("0"),
+            "from_float": Decimal("0"), "paid_out": Decimal("0"),
+            "pending": Decimal("0"),
+            "currency": str(r.get("currency") or base),
+            "last_at": 0, "movements": 0,
+        })
+        amount = _as_decimal(r.get("amount"))
+        if str(r.get("kind") or "") == "return":
+            who["returned"] += amount
+        else:
+            who["advanced"] += amount
+        who["movements"] += 1
+        who["last_at"] = max(who["last_at"], int(r.get("at") or 0))
+
+    # Read off the claims themselves rather than stored anywhere, so a claim
+    # settled a minute ago is already in the figure.
+    if holders:
+        for claim in _submissions_tbl_scan(org_id):
+            email = str(claim.get("submitted_by") or "").lower()
+            who = holders.get(email)
+            if who is None:
+                continue
+            # Withdrawn claims never happened.
+            if str(claim.get("review_action") or "") == "withdrawn":
+                continue
+            settled = str(claim.get("outcome") or "") == "settled"
+            if settled and str(claim.get("outcome_source") or "") == "float":
+                # Accounted for out of the advance: this is what draws it down.
+                who["from_float"] += _as_decimal(claim.get("outcome_paid"))
+            elif settled:
+                # Reimbursed separately. Recorded because finance will ask why
+                # a holder's spend and their float do not line up, and this is
+                # the answer - but it does not touch the balance.
+                who["paid_out"] += _as_decimal(claim.get("outcome_paid"))
+            else:
+                # Spent, not yet settled. The cash has left their hands and
+                # the advance has not been drawn down for it yet.
+                who["pending"] += _as_decimal(
+                    (claim.get("verdict") or {}).get("receipt_total"))
+
+    people = []
+    for who in holders.values():
+        out = who["advanced"] - who["returned"] - who["from_float"]
+        people.append({
+            "email": who["email"],
+            "name": who["name"],
+            "currency": who["currency"],
+            "advanced": str(who["advanced"]),
+            "returned": str(who["returned"]),
+            "from_float": str(who["from_float"]),
+            "paid_out": str(who["paid_out"]),
+            "pending": str(who["pending"]),
+            # What the company has advanced and not yet accounted for.
+            "held": str(out),
+            # And what they are actually carrying, once the claims already
+            # spent but not yet settled are taken off it. The figure that
+            # tells finance whether they can still buy next week's groceries.
+            "in_hand": str(out - who["pending"]),
+            "last_at": who["last_at"],
+            "movements": who["movements"],
+        })
+    people.sort(key=lambda p: _as_decimal(p["held"]))
+
+    return _reply(200, {
+        "currency": base,
+        "holders": people,
+        "movements": [{
+            "ts": int(r.get("ts") or 0),
+            "at": int(r.get("at") or 0),
+            "kind": str(r.get("kind") or "advance"),
+            "holder": str(r.get("holder") or ""),
+            "holder_name": str(r.get("holder_name") or ""),
+            "amount": str(r.get("amount") or "0"),
+            "currency": str(r.get("currency") or base),
+            "mode": str(r.get("mode") or ""),
+            "reference": str(r.get("reference") or ""),
+            "note": str(r.get("note") or ""),
+            "by": str(r.get("by_name") or r.get("by") or ""),
+        } for r in rows[:200]],
+    }, origin)
 
 
 def _credits_ledger(token: str, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
@@ -2169,6 +2407,19 @@ def _claim_outcome(token: str, body: dict[str, Any], origin: str | None) -> dict
         "outstanding": body.get("outstanding"),
         "mode": str(body.get("mode", ""))[:40],
         "reference": str(body.get("reference", ""))[:80],
+        # Where the money came from, on a claim by somebody holding a float.
+        #
+        # Two genuinely different acts wearing one word. Settling *from the
+        # float* moves no money at all: they already spent the company's cash,
+        # and the settlement is the company accounting for it - so it draws
+        # their advance down. A *separate payout* is an ordinary
+        # reimbursement, for a bill too large for the float or one they paid
+        # personally, and it must leave the float alone or the next
+        # replenishment is calculated against a balance that never moved.
+        #
+        # Defaulted rather than required: every claim before this shipped, and
+        # every claim by somebody with no float, is a payout.
+        "source": "float" if str(body.get("source", "")) == "float" else "payout",
         # Ours, off the row - not the bank's, and not the caller's to name.
         "claim_ref": str(item.get("reference", "")),
         "paid_on": str(body.get("paid_on", ""))[:24],
@@ -2187,12 +2438,14 @@ def _claim_outcome(token: str, body: dict[str, Any], origin: str | None) -> dict
         UpdateExpression=("SET outcome = :o, outcome_reason = :r, outcome_by = :b, "
                           "outcome_at = :ts, outcome_by_name = :bn, outcome_paid = :p, "
                           "outcome_mode = :m, outcome_reference = :ref, "
+                          "outcome_source = :src, "
                           "outcome_paid_on = :on"),
         ExpressionAttributeValues={
             ":o": kind, ":r": reason, ":b": actor, ":ts": now,
             ":bn": acting.get("name") or actor,
             ":p": str(claim.get("paid") or "0"),
             ":m": claim.get("mode") or "",
+            ":src": claim.get("source") or "payout",
             ":ref": claim.get("reference") or "",
             ":on": claim.get("paid_on") or "",
         },
@@ -3001,6 +3254,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "/claim/review", "/claim/retype",
                     "/credits/order", "/credits/verify",
                     "/submissions", "/people", "/credits/ledger", "/apikey", "/audit",
+                    "/advances", "/advances/record",
                     "/receipt/view", "/receipt/upload", "/receipt/submit")):
             email = str(body.get("email", "")).strip().lower()
             if not EMAIL_RE.match(email) or len(email) > 254:
@@ -3027,6 +3281,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _api_key(tok, body, origin)
         if path.endswith("/audit"):
             return _audit_log(tok, body, origin)
+        if path.endswith("/advances/record"):
+            return _advance_record(tok, body, origin)
+        if path.endswith("/advances"):
+            return _advances_view(tok, body, origin)
         if path.endswith("/submissions"):
             return _submissions_list(tok, body, origin)
         if path.endswith("/people"):

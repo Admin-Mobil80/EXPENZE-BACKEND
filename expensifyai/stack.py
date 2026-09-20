@@ -272,6 +272,27 @@ class ExpensifyAIStack(Stack):
             removal_policy=RemovalPolicy.RETAIN,
         )
 
+        # Cash advances - the float a handful of people hold and spend from.
+        #
+        # An append-only ledger, shaped exactly like the credit one above and
+        # for the same reason: a balance that is stored can drift from the
+        # events that produced it, and the events are what somebody asks about
+        # when the money does not add up. Nothing is ever updated here; a
+        # correction is another row.
+        advances_table = dynamodb.Table(
+            self,
+            "AdvancesTable",
+            table_name="Expenze-Advances",
+            partition_key=dynamodb.Attribute(
+                name="org_id", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="ts", type=dynamodb.AttributeType.NUMBER
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+
         intake_table = dynamodb.Table(
             self,
             "IntakeTable",
@@ -562,6 +583,8 @@ class ExpensifyAIStack(Stack):
         auth_fn.add_environment("RZP_SECRET_ARN", rzp_secret.secret_arn)
         auth_fn.add_environment("PURCHASES_TABLE", purchases_table.table_name)
         auth_fn.add_environment("LEDGER_TABLE", ledger_table.table_name)
+        auth_fn.add_environment("ADVANCES_TABLE", advances_table.table_name)
+        advances_table.grant_read_write_data(auth_fn)
         # Crediting a paid order writes the balance, so payments.py needs the
         # orgs table under the name it looks for.
         auth_fn.add_environment("ORGS_TABLE", orgs_table.table_name)
@@ -1125,6 +1148,11 @@ class ExpensifyAIStack(Stack):
         auth.add_resource("submissions").add_method("POST", auth_integration)
         auth.add_resource("people").add_method("POST", auth_integration)
         auth.add_resource("audit").add_method("POST", auth_integration)
+
+        # The float: paying one out, and reading what each holder has left.
+        advances_res = auth.add_resource("advances")
+        advances_res.add_method("POST", auth_integration)
+        advances_res.add_resource("record").add_method("POST", auth_integration)
 
         credits_res = auth.add_resource("credits")
         credits_res.add_resource("order").add_method("POST", auth_integration)
