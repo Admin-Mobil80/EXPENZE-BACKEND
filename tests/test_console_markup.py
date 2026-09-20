@@ -3911,13 +3911,30 @@ class SpendByPerson(unittest.TestCase):
 
     def test_an_empty_period_says_so_rather_than_rendering_nothing(self):
         self.assertIn("No receipts in ${periodLabel()}", self.block)
-        self.assertIn('blank("r-users", 6, msg)', self.app)
+        self.assertIn('blank("r-users", 5, msg)', self.app)
 
     def test_the_columns_match_the_report_beside_it(self):
         head = self.app.split('id="rsec-people"', 1)[1].split('id="r-users"', 1)[0]
-        for col in ("Person", "Receipts", "Claimed", "Reimbursable",
-                    "Settled", "Share of spend"):
+        for col in ("Person", "Receipts", "Claimed", "Settled",
+                    "Share of spend"):
             self.assertIn(f">{col}<", head)
+
+    def test_no_report_still_carries_a_reimbursable_column(self):
+        # It was the engine's arithmetic from when a verdict computed a
+        # fraction of a claim. A claim is worth what the receipt says now, so
+        # the column printed Claimed again on nearly every row - and on the
+        # rows where it did not, it was silently excluding refused claims,
+        # which is what Settled and the queue counts already answer.
+        # Comments stripped: the note explaining why the column is gone sits
+        # inside the <thead> it was removed from, and contains the word.
+        for head in re.findall(r"<thead>(.*?)</thead>", self.app, re.S):
+            head = re.sub(r"<!--.*?-->", " ", head, flags=re.S)
+            self.assertNotIn("Reimbursable", head)
+
+    def test_the_pending_settlement_tile_still_uses_the_figure(self):
+        # Cleared minus settled is a real number and a different question -
+        # what the company owes right now. Only the column went.
+        self.assertIn('$("rp-reimb").textContent = fmt(pending, home);', self.app)
 
 
 class TypingAClaimNothingCoveredIsConfirmed(unittest.TestCase):
