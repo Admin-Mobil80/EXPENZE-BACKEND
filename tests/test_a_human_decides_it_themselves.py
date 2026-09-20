@@ -155,12 +155,13 @@ class TheConsoleAsksTheSameQuestion(unittest.TestCase):
         self.assertIn(
             "const typeOk = rules.types.some(t => t.enabled && t.id === w.type);",
             self.detail)
-        self.assertIn("const choices = (!typeOk || unsaved || needsGroup)",
+        self.assertIn("const choices = (!typeOk || unsaved || needsGroup || unreadable)",
                       self.detail)
 
     def test_reject_is_always_offered(self):
-        block = self.detail.split("const choices = (!typeOk || unsaved || needsGroup)",
-                                  1)[1].split(";", 1)[0]
+        block = self.detail.split(
+            "const choices = (!typeOk || unsaved || needsGroup || unreadable)",
+            1)[1].split(";", 1)[0]
         self.assertEqual(2, block.count('"Rejected"'),
                          "both arms of the choice offer Reject")
 

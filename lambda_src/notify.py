@@ -282,11 +282,37 @@ def outcome_notice(claim: dict[str, Any]) -> dict[str, str]:
     total = money(claim.get("total"), ccy)
     verdict = str(claim.get("verdict") or "")
 
+    # The one case where the amount must not be quoted.
+    #
+    # A blurred photograph of a handwritten bill came back with no lines and
+    # no printed total, so the claim was worth zero - and this message duly
+    # told the person who sent it "*D. Velusamy* — INR 0.00. Sent to your
+    # finance team to look at." Quoting a figure we did not read as though we
+    # had read it is the one thing a receipt-reading product must never do,
+    # and INR 0.00 is not a figure any receipt carries.
+    #
+    # It is also the one blocked case worth naming to them. Everything else
+    # that stops a claim is a reviewer's business - a cap, a duplicate, a type
+    # nothing covers - and telling a claimant their bill is over the meals cap
+    # invites them to argue to the wrong audience. This is not that: it is a
+    # fact about their photograph, it is theirs to fix, and a better one sent
+    # now saves the reviewer squinting at the same image.
+    nothing_read = any(
+        str((v or {}).get("code") or "") == "nothing_read"
+        for v in (claim.get("violations") or []))
+
     if verdict == "approved":
         head = (f"*{vendor}* — {total}\n\n"
                 f"✅ Approved by the agent. {total} is going to your finance team "
                 "for payment.")
         tail = PENDING
+    elif nothing_read:
+        head = (f"*{vendor}*\n\n"
+                "We could not read this one — the photograph is too blurred or "
+                "dark to make out the amounts. It has gone to your finance team "
+                "anyway, so you do not need to do anything; a clearer photo of "
+                "the same bill would help them.")
+        tail = ""
     else:
         head = (f"*{vendor}* — {total}\n\n"
                 "Sent to your finance team to look at. Nothing is needed from you; "

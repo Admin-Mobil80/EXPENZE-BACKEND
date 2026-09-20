@@ -293,8 +293,9 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
     def test_the_console_withholds_approve_and_says_why(self):
         self.assertIn("const typeOk = rules.types.some(t => t.enabled && t.id === w.type);",
                       self.app)
-        block = self.app.split("const choices = (!typeOk || unsaved || needsGroup)",
-                               1)[1].split(";", 1)[0]
+        block = self.app.split(
+            "const choices = (!typeOk || unsaved || needsGroup || unreadable)",
+            1)[1].split(";", 1)[0]
         self.assertIn("Reject", block)
         self.assertNotIn("Approve as reviewed", block.split("[[", 1)[0] + block.split("]]", 1)[0])
 

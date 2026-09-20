@@ -619,6 +619,11 @@ def _tell_sender(row: dict[str, Any], verdict: dict[str, Any]) -> None:
             "total": verdict.get("receipt_total"),
             "reimbursable": verdict.get("reimbursable_total"),
             "verdict": verdict.get("verdict", ""),
+            # Not for the notice to recite - which finding blocked a claim is
+            # a reviewer's business, not the claimant's. `nothing_read` is the
+            # one exception, because it is a fact about their photograph and
+            # theirs to fix. See `notify.outcome_notice`.
+            "violations": verdict.get("violations") or [],
         })
         # Kept against the claim, so the console can show a reviewer the words
         # that actually went rather than the model's audit rationale, which is

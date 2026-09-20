@@ -394,6 +394,41 @@ def evaluate_policy(
     if printed is not None:
         receipt_total = printed
 
+    # Nothing was read off the bill at all.
+    #
+    # A blurred photograph of a handwritten bill came back with no line items
+    # and no printed total - the model said so in its own words, "the
+    # handwritten item details are too blurred to establish any covered
+    # expense category reliably" - and an empty list sums to zero, so the
+    # claim presented as a receipt for INR 0.00 that happened to have no
+    # expense type. The only finding on it was `no_rule_for_expense_type`,
+    # which pointed a reviewer at the expense type dropdown when the actual
+    # problem was that there were no figures on the claim to type anything
+    # about. The submitter was told "your claim for INR 0.00 has gone to your
+    # finance team", which is not a sentence anybody should receive.
+    #
+    # Zero is a reading, and it is one no real receipt produces: a bill for
+    # nothing is not a bill. So an empty reading is named as what it is, and
+    # named first, because every other finding about a claim with no figures
+    # is noise on top of it.
+    #
+    # Checked after `printed` is applied, so a receipt whose lines were
+    # unreadable but whose grand total was legible is a normal claim.
+    if receipt_total == 0 and not decided and printed is None:
+        # First in the list, not last. `no_rule_for_expense_type` was appended
+        # before this point and is the one a reviewer sees at the top - and on
+        # a claim with no figures it is advice about the wrong control.
+        violations.insert(0, {
+            "code": "nothing_read",
+            "message": (
+                "Nothing could be read off this receipt - no line items and no "
+                "printed total. The photograph is likely too blurred, too dark "
+                "or cropped. Somebody has to read the bill itself and decide."
+            ),
+            "amount": None,
+            "blocks_automatic_decision": True,
+        })
+
     # A bill cannot come to less than nothing.
     #
     # Lines may be negative one at a time; their sum may not. A total below
