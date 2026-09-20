@@ -833,13 +833,15 @@ class AnEmptyQueueLooksEmpty(unittest.TestCase):
     def test_the_empty_message_does_not_overclaim(self):
         # Some of those were approved by a person, not cleared on their own.
         self.assertNotIn("Every receipt today cleared policy on its own", self.source)
-        # The richer blank panel carries it now - one empty state, with the
-        # channels on it, rather than two saying the same thing.
-        self.assertIn("Nothing is waiting for a decision. Anything cleared is in "
-                      "Pending settlement until it is paid.", self.source)
+        self.assertIn("Every claim has been decided. Nothing here needs you.",
+                      self.source)
 
     def test_it_says_where_the_cleared_ones_went(self):
-        self.assertIn("Anything cleared is in Pending settlement until it is paid.", self.source)
+        # As somewhere to go rather than as a sentence. The old line said
+        # "anything cleared is in Pending settlement until it is paid", which
+        # is true and leaves the reader to go and count it.
+        self.assertIn('["payments", "Pending settlement",', self.source)
+        self.assertIn("owed to submitters, waiting to be paid.", self.source)
 
 
 class SignOutIsAControl(unittest.TestCase):
