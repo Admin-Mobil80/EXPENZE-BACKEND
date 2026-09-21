@@ -152,7 +152,9 @@ class TheConsoleMovesItBackToTheQueue(unittest.TestCase):
         # findings. The claim passed every rule" - true, and useless.
         self.assertIn("sent_back_for_review", self.app)
         self.assertIn("did not agree with the agent", self.app)
-        self.assertIn("!res.violations.length && !sentBack", self.app)
+        # `standing`, not the stored list: a finding the claim has since
+        # answered is not a reason to say there are findings.
+        self.assertIn("!standing.length && !sentBack", self.app)
 
     def test_the_page_still_parses(self):
         # A stray brace in the branch above would take the whole console down,
