@@ -2302,7 +2302,11 @@ class ThePaidColumnEarnsItsPlace(unittest.TestCase):
                       self.app)
 
     def test_the_row_emits_one_figure_or_three(self):
-        row = self.app.split("// One figure, unless a part payment", 1)[1][:400]
+        # A wider slice than 400 characters: the Owed cell grew the billed
+        # amount beneath it, and a fixed-length window is a test that passes
+        # or fails on how much sits above the line it is looking for.
+        row = self.app.split("// One figure, unless a part payment", 1)[1].split(
+            "tb.appendChild(tr);", 1)[0]
         self.assertIn("(anyPartPaid", row)
         self.assertIn("fmt(c.approved, ccy)", row)
         self.assertIn("fmt(c.paid, ccy)", row)
@@ -4089,6 +4093,10 @@ class TheReviewQueueSaysWhatItIsWorth(unittest.TestCase):
         with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as handle:
             self.app = handle.read()
         self.fn = self.app.split("function paintQueueTiles(queue) {", 1)[1].split("\n}", 1)[0]
+        # The arithmetic moved out of the tile when the list grew a total of
+        # its own: one computation, two readers, so they cannot disagree.
+        self.sum = self.app.split("function claimsTotal(subs) {", 1)[1].split(
+            "\n}", 1)[0]
 
     def test_claimed_and_possible_payout_are_two_different_figures(self):
         # One figure. "Possible payout" was the same number written twice
@@ -4096,15 +4104,48 @@ class TheReviewQueueSaysWhatItIsWorth(unittest.TestCase):
         # beside a real claimed figure, read as a refusal.
         self.assertIn('id="q-claimed"', self.app)
         self.assertNotIn('id="q-payout"', self.app)
-        self.assertIn("at(sub, evaluate(sub).receiptTotal)", self.fn)
+        self.assertIn("at(sub, evaluate(sub).receiptTotal)", self.sum)
 
     def test_it_counts_in_the_currency_payouts_are_made_in(self):
-        self.assertIn("const home = orgCurrency();", self.fn)
-        self.assertIn("sub.payoutValue && parseFloat(sub.payoutValue.rate)", self.fn)
+        self.assertIn("const home = orgCurrency();", self.sum)
+        self.assertIn("sub.payoutValue && parseFloat(sub.payoutValue.rate)",
+                      self.sum)
 
     def test_a_claim_with_no_rate_is_named_not_summed_at_zero(self):
-        self.assertIn("const stuck = queue.filter(", self.fn)
+        self.assertIn("const stuck = subs.filter(", self.sum)
         self.assertIn("not converted — no rate available.", self.fn)
+
+    def test_the_tile_and_the_list_total_are_one_figure(self):
+        # Two sums over the same rows is a pair that eventually disagrees by a
+        # rounding rule nobody remembers choosing.
+        self.assertIn("const { total: claimed, stuck, home } = claimsTotal(queue);",
+                      self.fn)
+        foot = self.app.split("function totalRow(box, subs, columns) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("claimsTotal(subs)", foot)
+
+    def test_the_total_is_not_a_row_anybody_can_click(self):
+        foot = self.app.split("function totalRow(box, subs, columns) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn('tr.className = "listtotal";', foot)
+        # `wireClaimRows` keys off `tr.opens`, which this does not carry.
+        self.assertIn('tbody.querySelectorAll("tr.opens")', self.app)
+
+    def test_a_mixed_currency_column_says_the_total_was_converted(self):
+        # Thirteen rows of dollars and rupees over one rupee figure looks like
+        # arithmetic that does not work unless it says what it did.
+        foot = self.app.split("function totalRow(box, subs, columns) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn('foreign ? ` \u00b7 converted to ${home}` : ""', foot)
+        self.assertIn("with no rate, counted as nil", foot)
+
+    def test_each_row_shows_what_the_bill_said_and_what_it_comes_to(self):
+        # So the column the total adds up is on the page to be added up.
+        cell = self.app.split("function claimedCell(sub, res) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn('if (!ccy || ccy === home) return billed;', cell)
+        self.assertIn('<span class="inhome">', cell)
+        self.assertIn('<span class="inhome norate">no rate</span>', cell)
 
     def test_it_says_how_long_the_oldest_has_waited(self):
         # The number that says whether the queue is being worked or silting up.
