@@ -162,6 +162,62 @@ class ItReachesThePeopleWhoWouldQuoteIt(unittest.TestCase):
         self.assertIn('bits.length ? `<span class="rowmeta">${bits.join(', row)
 
 
+class TheTabIconIsDeclaredOnce(unittest.TestCase):
+    """Five icon links, and Safari drew its own letter instead.
+
+    ReconFlow sits two tabs away in the same browser and draws its mark from
+    exactly one line. Expenze declared an SVG, an .ico with sizes="any", a 192,
+    a 512 and an apple-touch-icon; Chrome picks the best match from a list, and
+    Safari picks - and what it picked here it would not draw.
+
+    Four things were wrong with this before that one, each real and none of
+    them the cause: the icons were served as text/html, the cache-busting query
+    gave every file two identities, the console never closed its head, and the
+    files themselves were fine throughout. Worth a test, because the next
+    plausible-looking addition to this list is how it comes back.
+    """
+
+    def setUp(self):
+        self.pages = {}
+        for name in ("index.html", "login.html", "app.html"):
+            with open(os.path.join(ROOT, "..", "PORTAL", name),
+                      encoding="utf-8") as handle:
+                self.pages[name] = handle.read()
+
+    def test_each_page_declares_exactly_one(self):
+        for name, page in self.pages.items():
+            self.assertEqual(1, page.count('<link rel="icon"'), name)
+
+    def test_and_it_is_the_svg(self):
+        for name, page in self.pages.items():
+            self.assertIn('<link rel="icon" type="image/svg+xml" href="/favicon.svg">',
+                          page, name)
+
+    def test_nothing_competes_with_it(self):
+        # sizes="any" and the two big PNGs are each a thing Safari might have
+        # chosen. /favicon.ico is still on the bucket and still probed at the
+        # root without being told to, so the fallback survives the removal.
+        for name, page in self.pages.items():
+            for gone in ('sizes="any"', "icon-192", "icon-512", 'href="/favicon.ico"'):
+                self.assertNotIn(gone, page, f"{name}: {gone}")
+
+    def test_apple_touch_icon_stays(self):
+        # A different rel. It never competes for the tab, and it is what an
+        # iPhone home screen uses.
+        for name, page in self.pages.items():
+            self.assertIn('<link rel="apple-touch-icon" href="/apple-touch-icon.png">',
+                          page, name)
+
+    def test_every_page_closes_its_head_and_opens_its_body(self):
+        # app.html did neither, and closed with both anyway. A parser recovers,
+        # so nothing looked wrong for as long as it was true.
+        for name, page in self.pages.items():
+            low = page.lower()
+            self.assertEqual(1, low.count("</head>"), name)
+            self.assertEqual(1, low.count("<body>"), name)
+            self.assertLess(low.index("<link rel=\"icon\""), low.index("</head>"), name)
+
+
 if __name__ == "__main__":
     unittest.main()
 
