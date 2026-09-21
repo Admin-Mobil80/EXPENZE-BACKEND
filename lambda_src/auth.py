@@ -2389,6 +2389,24 @@ def _claim_outcome(token: str, body: dict[str, Any], origin: str | None) -> dict
             "error": "Give a reason. It is the only thing the submitter can act on."
         }, origin)
 
+    # A settlement carries the reference that ties it to the bank statement.
+    #
+    # It was optional, and the amount arrives prefilled, so a payment could be
+    # recorded by pressing one button with every field untouched. That is how
+    # a claim came to be settled in full by somebody who had not seen the form
+    # - and the record it left said INR 6,632.00 paid, by nobody's transfer,
+    # on no reference anybody could look up.
+    #
+    # Requiring it means a payment cannot be recorded without somebody having
+    # looked up what they actually paid, which is the same act that makes the
+    # record worth keeping. Checked here as well as in the console, because
+    # the console is a page somebody can have open from before this shipped.
+    if kind == "settled" and not str(body.get("reference", "")).strip():
+        return _reply(400, {
+            "error": "Give the transaction reference - the UTR, cheque number "
+                     "or transaction id. It is what ties this claim to the "
+                     "line on the bank statement."}, origin)
+
     submission_id = str(body.get("submission_id", "")).strip()[:80]
     item = _submissions.get_item(Key={"submission_id": submission_id}).get("Item") if submission_id else None
     if not item or item.get("org_id") != acting.get("org_id"):

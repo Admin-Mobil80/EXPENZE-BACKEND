@@ -280,13 +280,21 @@ class TheConsoleOffersTheChoiceWhereTheMoneyIsPaid(unittest.TestCase):
     def test_it_defaults_to_whichever_is_true(self):
         # Inside the float is the ordinary case; a bill beyond it cannot come
         # out of money they do not have.
-        self.assertIn("const fits = c.outstanding <= inHand;", self.fn)
+        self.assertIn("const fits = c.outstanding <= stillOut;", self.fn)
         self.assertIn('sel.value = fits ? "float" : "payout";', self.fn)
 
     def test_it_says_what_each_choice_does_to_the_balance(self):
         self.assertIn("No money moves.", self.fn)
-        self.assertIn("this draws it down to", self.fn)
-        self.assertIn("Paid to them on top of the float", self.fn)
+        self.assertIn("It draws the advance down from", self.fn)
+        self.assertIn("Reimbursed on top of the float, which stays at", self.fn)
+
+    def test_it_quotes_what_is_still_out_rather_than_what_is_in_hand(self):
+        # `in hand` subtracts every unsettled claim including this one, so it
+        # read "the float stays at -5,632.00" on an ordinary payout - not a
+        # sentence to parse while deciding how to pay somebody. `still out` is
+        # the figure this decision actually moves.
+        self.assertIn("const stillOut = advMinor(float0.held);", self.fn)
+        self.assertNotIn("float0.in_hand", self.fn)
 
     def test_the_choice_reaches_the_server(self):
         self.assertIn('source: (td.querySelector("#sf-source") || {}).value || "payout"',

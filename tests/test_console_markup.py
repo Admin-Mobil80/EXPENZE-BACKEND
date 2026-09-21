@@ -2347,9 +2347,17 @@ class TheSettlementIsOneAct(unittest.TestCase):
     def test_an_account_with_no_groups_leaves_no_hole(self):
         self.assertIn("wrap.hidden = true", self.app)
 
-    def test_the_button_lines_up_with_the_inputs(self):
+    def test_the_button_is_on_its_own_line_and_does_not_wrap(self):
+        # It shared a 1fr track with the fields, so its label had to fit
+        # whatever width was left - and "Record 6,632.00 as paid" wrapped onto
+        # two lines and spilled out of the box. Still inside the grid, because
+        # recording a payment is one act; just on its own line, where the
+        # label can be as long as it needs.
+        act = self.css.split(".settle-grid .sf-act {", 1)[1].split("}", 1)[0]
+        self.assertIn("grid-column:1 / -1", act)
         rule = self.css.split(".settle-grid .sf-act .btn {", 1)[1].split("}", 1)[0]
-        self.assertIn("height:30px", rule)
+        self.assertIn("white-space:nowrap", rule)
+        self.assertIn("width:auto", rule)
 
 
 class TheRouteLineDoesNotGiveDirectionsYouFollowed(unittest.TestCase):
@@ -4354,9 +4362,12 @@ class TwoButtonsOneLabel(unittest.TestCase):
         self.assertIn("`Record ${fmt(Math.min(minor, c.outstanding), ccy)} as paid`",
                       self.form)
 
-    def test_an_empty_amount_disables_it(self):
-        self.assertIn('goBtn.disabled = !(minor > 0);', self.form)
+    def test_an_empty_amount_or_reference_disables_it(self):
+        # The reference is required now, and the button says which of the two
+        # is missing rather than sitting dead with no explanation.
+        self.assertIn("goBtn.disabled = !(minor > 0) || !ref;", self.form)
         self.assertIn('"Enter an amount"', self.form)
+        self.assertIn('"Enter the transaction reference"', self.form)
 
     def test_the_two_labels_are_not_the_same_string(self):
         # The regression in one assertion.
