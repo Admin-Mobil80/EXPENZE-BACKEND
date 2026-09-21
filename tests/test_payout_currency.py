@@ -68,7 +68,7 @@ class MyExpensesPrintsWhatWasPaid(unittest.TestCase):
         # the same money.
         cell = self.app.split("function claimedCell(sub, res) {", 1)[1].split(
             "\n}", 1)[0]
-        self.assertIn('<span class="inhome">', cell)
+        self.assertIn('<span class="amtsub">', cell)
         self.assertIn("res.receiptTotal * rate", cell)
 
     def test_a_rupee_claim_keeps_one_line(self):

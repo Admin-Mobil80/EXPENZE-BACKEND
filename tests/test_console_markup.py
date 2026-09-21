@@ -4144,8 +4144,38 @@ class TheReviewQueueSaysWhatItIsWorth(unittest.TestCase):
         cell = self.app.split("function claimedCell(sub, res) {", 1)[1].split(
             "\n}", 1)[0]
         self.assertIn('if (!ccy || ccy === home) return billed;', cell)
-        self.assertIn('<span class="inhome">', cell)
-        self.assertIn('<span class="inhome norate">no rate</span>', cell)
+        self.assertIn('<span class="amtmain">', cell)
+        self.assertIn('<span class="amtsub">', cell)
+        self.assertIn('<span class="amtsub norate">no rate</span>', cell)
+
+    def test_and_the_converted_figure_is_the_one_at_full_size(self):
+        # An eye running down the column has to meet the same currency at the
+        # same size on every row, or the foot of it appears to total the small
+        # print. The converted figure is what the total adds up, so it leads
+        # and the bill's own figure is the second line.
+        cell = self.app.split("function claimedCell(sub, res) {", 1)[1].split(
+            "\n}", 1)[0]
+        converted = cell.index("res.receiptTotal * rate")
+        main = cell.index('<span class="amtmain">', cell.index("if (!rate)"))
+        sub = cell.index('<span class="amtsub">')
+        # The conversion is inside the main span, and the billed line follows.
+        self.assertLess(main, converted)
+        self.assertLess(converted, sub)
+
+    def test_a_row_with_no_rate_leads_with_the_only_figure_there_is(self):
+        # Nothing to convert with, so the bill's own number is the top line
+        # rather than a blank one, and the second says why no rupees follow.
+        cell = self.app.split("function claimedCell(sub, res) {", 1)[1].split(
+            "\n}", 1)[0]
+        norate = cell.split("if (!rate)", 1)[1].split(";", 1)[0]
+        self.assertIn('<span class="amtmain">${billed}</span>', norate)
+        self.assertIn("norate", norate)
+
+    def test_the_settlement_column_is_arranged_the_same_way(self):
+        # It had reached this arrangement first, under names of its own. Two
+        # vocabularies for one idea is how they drift apart again.
+        self.assertNotIn('class="billed', self.app)
+        self.assertNotIn('class="inhome', self.app)
 
     def test_it_says_how_long_the_oldest_has_waited(self):
         # The number that says whether the queue is being worked or silting up.

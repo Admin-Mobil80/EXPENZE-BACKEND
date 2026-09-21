@@ -177,7 +177,9 @@ class FinanceKeepsBothDocuments(unittest.TestCase):
         # The companion is the same money on the same day from the same
         # vendor; listing it twice reads as having been charged twice.
         self.assertIn("SUBMISSIONS.filter(s => isMine(s) && !isCompanion(s))", self.app)
-        self.assertIn("documents</span>", self.app)
+        # And the row still says there were two, on the line that identifies
+        # it, so "one row" is not mistaken for "one document".
+        self.assertIn("if (docs > 1) bits.push(`${docs} documents`);", self.app)
 
 
 if __name__ == "__main__":

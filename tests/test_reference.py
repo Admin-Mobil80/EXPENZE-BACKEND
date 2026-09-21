@@ -146,12 +146,20 @@ class ItReachesThePeopleWhoWouldQuoteIt(unittest.TestCase):
 
     def test_the_console_shows_it(self):
         self.assertIn("reference: s.reference", self.app)
-        self.assertIn('class="refno"', self.app)
+        # On the submitter's own list it joins the line that identifies the
+        # row - receipt, document count, claim number - rather than starting
+        # a third line of its own. See `.rowmeta`.
+        self.assertIn("if (sub.reference) bits.push(esc(sub.reference));", self.app)
+        self.assertIn(".rowmeta {", self.app)
 
     def test_a_receipt_from_before_today_shows_none(self):
         # There is no number that was ever issued for those, and inventing one
-        # now would be a reference nobody could look up.
-        self.assertIn('sub.reference ? `<span class="refno">', self.app)
+        # now would be a reference nobody could look up. So it is pushed onto
+        # the line only when there is one, and the separators come from the
+        # join rather than being written around an empty string.
+        row = self.app.split("function renderMine() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("if (sub.reference) bits.push(esc(sub.reference));", row)
+        self.assertIn('bits.length ? `<span class="rowmeta">${bits.join(', row)
 
 
 if __name__ == "__main__":
