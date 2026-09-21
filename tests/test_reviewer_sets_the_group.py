@@ -104,5 +104,78 @@ class NobodyIsAskedWhichGroup(unittest.TestCase):
         self.assertIn("Set it before approving.", worker)
 
 
+class PickingAGroupIsNotTheSameAsRecordingOne(unittest.TestCase):
+    """Approve was offered on a claim whose group existed only on the screen.
+
+    Mobil80-Exp-44 sat at `group_id: ""` with `group_status: "ask"`. The
+    reviewer picked the cost centre from the dropdown, which writes it to the
+    working copy and nowhere else, and three things then went wrong at once:
+    the finding about the missing group cleared, because `groupOf` reads the
+    working copy first; no Save button appeared, because the test for a change
+    compared `w.group` against `groupOf(sub).id`, which is `w.group`; and
+    Approve uncovered, because `isPristine` never looked at the group at all.
+
+    So the console asked for a cost centre, accepted one, gave no way to record
+    it, and offered a button the server refused three times. The claim never
+    moved to Pending settlement, and it was right not to: nothing about it had
+    changed.
+    """
+
+    def setUp(self):
+        self.app = src("..", "PORTAL", "app.html")
+
+    def test_an_unsaved_group_withholds_approve(self):
+        # The gate that uncovers Approve has to see the group, or a reviewer
+        # who has answered the question on screen is handed a button the
+        # server will refuse for a question it still considers open.
+        pristine = self.app.split("const isPristine = (sub,w) =>", 1)[1] \
+                           .split(";", 1)[0]
+        self.assertIn("sub.groupId", pristine)
+
+    def test_and_it_is_the_record_that_is_compared_not_the_screen(self):
+        # `groupOf` answers "what does this page show", which on an unsaved
+        # pick is the reviewer's own choice. Comparing against it asks whether
+        # the choice equals itself.
+        for expr in (self.app.split("const isPristine = (sub,w) =>", 1)[1].split(";", 1)[0],
+                     self.app.split("const changed = !frozen", 1)[1].split(";", 1)[0]):
+            self.assertNotIn("groupOf(sub)", expr)
+            self.assertIn("sub.groupId", expr)
+
+    def test_a_group_left_alone_is_not_an_unsaved_change(self):
+        # `w.group` is absent until somebody touches the control, so absence
+        # is the test. Reading the value instead makes every claim that has a
+        # group look edited, and parks a Save button on all of them.
+        for expr in (self.app.split("const isPristine = (sub,w) =>", 1)[1].split(";", 1)[0],
+                     self.app.split("const changed = !frozen", 1)[1].split(";", 1)[0]):
+            self.assertIn('"group" in w', expr)
+
+    def test_clearing_a_group_still_counts_as_a_change(self):
+        # "" is a real answer - a reviewer removing a tag the agent got wrong -
+        # and a truthiness test would drop it silently.
+        pristine = self.app.split("const isPristine = (sub,w) =>", 1)[1].split(";", 1)[0]
+        self.assertNotIn("!w.group", pristine)
+
+    def test_the_working_copy_is_dropped_when_the_record_s_group_moves(self):
+        # Otherwise a pick made here outlives the answer somebody else saved.
+        seed = self.app.split("function seedOf(sub) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("sub.groupId", seed)
+
+    def test_the_unsaved_notice_names_the_group(self):
+        # "Unsaved change. Save it before approving." makes a reviewer hunt
+        # for what they touched. The other two changes are named; this one was
+        # not, so the one change that had no Save button was also the one
+        # change the notice would not identify.
+        pending = self.app.split("const pending = [", 1)[1].split("];", 1)[0]
+        self.assertIn("Group \u2192", pending)
+
+    def test_the_missing_group_is_reported_once(self):
+        # The agent raises `group_not_set` itself and it prints with the rest
+        # of the findings, so the console adding its own row unconditionally
+        # put the same requirement on screen twice in two wordings.
+        guard = self.app.split("const needsGroup = !decision && !stage", 1)[1] \
+                        .split("{", 1)[0]
+        self.assertIn('v.code === "group_not_set"', guard)
+
+
 if __name__ == "__main__":
     unittest.main()
