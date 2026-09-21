@@ -170,8 +170,10 @@ class TheBoxSaysItPlainly(unittest.TestCase):
     def test_it_sits_beside_the_two_that_raise_the_question(self):
         self.assertIn("${wa}${mail}${turnaroundBox()}", self.app)
 
-    def test_it_draws_nothing_without_a_figure(self):
-        self.assertIn("if (!t.days) return \"\";", self.fn)
+    def test_it_draws_a_placeholder_rather_than_nothing(self):
+        # Superseded: it used to return "" below three settled claims.
+        self.assertIn("if (!t.days) {", self.fn)
+        self.assertIn('<span class="addr">&mdash;</span>', self.fn)
 
     def test_it_reads_as_a_typical_wait_not_a_promise(self):
         self.assertIn("Usually reimbursed in", self.fn)
@@ -269,7 +271,22 @@ class OneFigureShownInTwoPlaces(unittest.TestCase):
     def test_three_is_the_floor_in_both_places(self):
         self.assertIn("three needed for a median", self.triage)
         box = self.app.split("function turnaroundBox() {", 1)[1].split("\n}", 1)[0]
-        self.assertIn('if (!t.days) return "";', box)
+        self.assertIn("a typical time appears at three", box)
+
+    def test_the_box_is_drawn_before_there_is_a_figure(self):
+        # It drew nothing below three, which left a gap in a row of three
+        # boxes and no way to tell whether the product had no answer or had
+        # not been built to give one. A box saying what it is waiting for is
+        # an answer; an absence is not.
+        box = self.app.split("function turnaroundBox() {", 1)[1].split("\n}", 1)[0]
+        self.assertNotIn('return "";', box)
+        self.assertIn('<span class="addr">&mdash;</span>', box)
+        self.assertIn('class="sendto off"', box)
+
+    def test_a_brand_new_account_says_so_differently(self):
+        # "0 settled so far" is a worse sentence than the one it replaces.
+        box = self.app.split("function turnaroundBox() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("Nothing settled yet", box)
 
 
 class AMedianOverSettledClaimsAloneWouldFlatter(unittest.TestCase):

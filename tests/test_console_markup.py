@@ -4440,3 +4440,67 @@ class TwoButtonsOneLabel(unittest.TestCase):
         # The regression in one assertion.
         self.assertNotIn('id="sf-go">Record payment</button>', self.app)
 
+class SettledAndRefusedAreNotOneThing(unittest.TestCase):
+    """My expenses had "Closed", which held both.
+
+    Whether you were paid and whether you were refused are the two things a
+    person most wants told apart about their own money, and the tab that
+    grouped them answered with a word that means neither. Three tabs now:
+    Pending settlement, Settled, Rejected.
+
+    A withdrawn claim sits with rejected. From the claimant's side both mean
+    "no money is coming", and the row's own badge still says which of the two
+    it was - so nothing on screen claims the company refused something the
+    person took back themselves.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as handle:
+            self.app = handle.read()
+        self.sections = self.app.split("const MINE_SECTIONS = [", 1)[1].split(
+            "\n];", 1)[0]
+
+    def test_the_three_tabs(self):
+        for label in ('"Pending settlement"', '"Settled"', '"Rejected"'):
+            self.assertIn(label, self.sections)
+        self.assertNotIn('"Closed"', self.sections)
+
+    def test_each_tab_carries_its_own_test(self):
+        # One list of (id, label, predicate), so the tab strip and the rows
+        # under it cannot disagree about what belongs where.
+        self.assertIn('(sub) => !isClosed(sub)', self.sections)
+        self.assertIn('claimStage(sub).stage === "settled"', self.sections)
+        self.assertIn('["rejected", "withdrawn"].includes(claimStage(sub).stage)',
+                      self.sections)
+
+    def test_the_rows_are_bucketed_by_the_same_list(self):
+        body = self.app.split("function renderMine() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("MINE_SECTIONS.forEach(([id, , holds]) => { buckets[id] = mine.filter(holds); });",
+                      body)
+        self.assertIn("const shown = buckets[mineSection] || buckets.pending;", body)
+
+    def test_the_finished_tabs_are_badged_quietly(self):
+        # The red badge is for work somebody still has to do. A count of
+        # finished things in an alarm colour is an alarm about nothing.
+        tabs = self.app.split("function renderMineTabs(buckets) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn('flag.className = "navflag" + (id === "pending" ? "" : " count");',
+                      tabs)
+        css = self.app.split("<style>", 1)[1].rsplit("</style>", 1)[0]
+        self.assertIn(".navflag.count { background:var(--surface-2); color:var(--muted);",
+                      css)
+
+    def test_each_tab_has_its_own_empty_state(self):
+        body = self.app.split("function renderMine() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('mineSection === "settled" ?', body)
+        self.assertIn('mineSection === "rejected" ?', body)
+        self.assertIn("Nothing of yours has been refused.", body)
+
+    def test_stepping_follows_the_tab_you_are_on(self):
+        sibs = self.app.split("function siblingsFor(from) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("MINE_SECTIONS.find(([id]) => id === mineSection)", sibs)
+        # And falls back to the first rather than to nothing, so Previous and
+        # Next never vanish because of a stale tab id.
+        self.assertIn("|| MINE_SECTIONS[0])[2]", sibs)
+
