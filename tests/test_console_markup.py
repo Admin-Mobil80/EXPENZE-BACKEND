@@ -2839,7 +2839,7 @@ class ASettledClaimIsDeadInEveryControl(unittest.TestCase):
         # Plus `rechecking`: while the agent has the claim back, the type,
         # the currency and the group are about to be re-judged, so they are
         # not editable either.
-        self.assertIn("const frozen = paid || unread || saving || !reviewingHere();",
+        self.assertIn("const frozen = paid || unread || saving || deciding || !reviewingHere();",
                       self.detail)
 
     def test_the_four_controls_are_assigned_exactly_once(self):

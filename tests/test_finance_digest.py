@@ -1,25 +1,34 @@
-"""Telling finance what came in, without telling them forty times.
+"""Telling finance what is ready to pay, and only that.
 
-A finance executive needs to know receipts are arriving. They do not need one
-email per receipt: a team filing a month on a Friday would send forty, the
-fortieth is read by nobody, and that makes the first thirty-nine worthless too
-- the habit it teaches is to filter the lot, and then the one that mattered is
-filtered with them.
+This emailed them every receipt that arrived. A receipt arriving is not
+finance's business: it may still be with the agent, it may be about to be
+refused, and in every case somebody else decides before there is anything to
+pay. What they were given was a stream they could not act on, and a stream
+nobody can act on is one they learn to filter - which takes the message that
+mattered with it.
+
+A claim clearing for settlement is the moment the work becomes theirs, so that
+is the moment this fires. Still in batches: a team whose month is approved in
+one sitting would otherwise send forty emails, the fortieth is read by nobody,
+and that makes the first thirty-nine worthless too.
 """
 from __future__ import annotations
 
+import json
 import os
+import sys
 import unittest
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.join(ROOT, "lambda_src"))
+os.environ.setdefault("INTAKE_TABLE", "t")
+os.environ.setdefault("ORGS_TABLE", "t")
+os.environ.setdefault("USERS_TABLE", "t")
+os.environ.setdefault("OTP_SENDER", "no-reply@expenze.ai")
+os.environ.setdefault("INTAKE_ADDRESS", "receipts@expenze.ai")
 
-class FinanceIsToldInBatchesNotPerReceipt(unittest.TestCase):
-    """Forty receipts on a Friday is one email, not forty.
 
-    The fortieth is read by nobody, which makes the first thirty-nine
-    worthless too - the habit it teaches is to filter the lot, and then the one
-    that mattered is filtered with them.
-    """
+class FinanceIsToldWhenThereIsSomethingToPay(unittest.TestCase):
 
     def setUp(self):
         for name, path in (("digest", "lambda_src/digest.py"),
@@ -28,16 +37,57 @@ class FinanceIsToldInBatchesNotPerReceipt(unittest.TestCase):
             with open(os.path.join(ROOT, path), encoding="utf-8") as h:
                 setattr(self, name, h.read())
 
+    def test_a_receipt_arriving_is_not_an_event_finance_hears_about(self):
+        # They cannot act on it: it may still be with the agent, and somebody
+        # else decides before there is anything to pay.
+        self.assertNotIn("def _arrivals(", self.digest)
+        self.assertNotIn("received_at > :a AND received_at <= :b", self.digest)
+        self.assertNotIn("def submissions_digest(", self.notify)
+
+    def test_it_fires_when_a_claim_clears_for_settlement(self):
+        self.assertIn("def _cleared_at(", self.digest)
+        self.assertIn("def ready_to_pay_digest(", self.notify)
+
+    def test_both_ways_a_claim_can_clear_are_counted(self):
+        # A person approved it, or the agent cleared it against the policy and
+        # nobody had to. Both put money on finance's desk.
+        fn = self.digest.split("def _cleared_at(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('if action == "approved":', fn)
+        self.assertIn('row.get("review_at")', fn)
+        self.assertIn('("approved", "partially_approved")', fn)
+        self.assertIn('row.get("audited_at")', fn)
+
+    def test_and_the_ones_that_are_not_finance_s_problem_are_left_out(self):
+        fn = self.digest.split("def _cleared_at(", 1)[1].split("\ndef ", 1)[0]
+        # A second document of a claim is not a second thing to pay; a settled
+        # one is not waiting; a rejected one is the opposite outcome.
+        self.assertIn('row.get("companion_of")', fn)
+        self.assertIn('row.get("outcome")', fn)
+        self.assertIn("blocks_automatic_decision", fn)
+
+    def test_the_two_timestamp_units_on_one_row_are_normalised(self):
+        # `received_at` is milliseconds and `review_at` and `audited_at` are
+        # seconds. Mixing them has produced a confident wrong answer here
+        # before, and a window comparison is exactly where it would happen.
+        self.assertIn("def _ms(", self.digest)
+        fn = self.digest.split("def _ms(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("10 ** 11", fn)
+        import digest
+        self.assertEqual(digest._ms(1790000237), 1790000237000)   # seconds
+        self.assertEqual(digest._ms(1789986038604), 1789986038604)  # already ms
+        self.assertEqual(digest._ms(None), 0)
+        self.assertEqual(digest._ms("not a number"), 0)
+
     def test_one_message_covers_a_window(self):
         # Not a batch size anybody has to choose, and nothing that changes
-        # behaviour at a threshold: one receipt in the window is an email about
-        # one receipt, twenty is one email listing twenty.
-        self.assertIn("def _arrivals(", self.digest)
-        self.assertIn("received_at > :a AND received_at <= :b", self.digest)
+        # behaviour at a threshold: one claim in the window is an email about
+        # one claim, twenty is one email listing twenty.
+        body = self.digest.split("def _run_one(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("if since < at <= now_ms:", body)
 
     def test_the_mark_moves_only_when_an_email_actually_went(self):
-        # A duplicate digest is a nuisance; a silently skipped one is a claim
-        # nobody looked at.
+        # A duplicate digest is a nuisance; a silently skipped one is money
+        # nobody paid.
         body = self.digest.split("def _run_one(", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("if sent:\n        _stamp(org_id, now_ms)", body)
         self.assertIn("reached nobody", body)
@@ -46,7 +96,7 @@ class FinanceIsToldInBatchesNotPerReceipt(unittest.TestCase):
         # Otherwise a quiet week makes the next digest reach back over all of
         # it in one message.
         body = self.digest.split("def _run_one(", 1)[1].split("\ndef ", 1)[0]
-        nothing = body.split("if not rows:", 1)[1].split("return 0", 1)[0]
+        nothing = body.split("if not fresh:", 1)[1].split("return 0", 1)[0]
         self.assertIn("_stamp(org_id, now_ms)", nothing)
 
     def test_a_first_run_does_not_email_the_whole_history(self):
@@ -54,32 +104,34 @@ class FinanceIsToldInBatchesNotPerReceipt(unittest.TestCase):
         fn = self.digest.split("def _since(", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("now_ms - FIRST_RUN_LOOKBACK * 1000", fn)
 
+    def test_the_standing_total_travels_with_the_new_ones(self):
+        # The question finance opens this to answer is "how much do we owe",
+        # not "how much more than last time".
+        body = self.digest.split("def _run_one(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("outstanding = [_line(r) for r in waiting]", body)
+        self.assertIn("waiting to be ", self.notify)
+
     def test_only_active_finance_executives_are_told(self):
         fn = self.digest.split("def _finance(", 1)[1].split("\ndef ", 1)[0]
         self.assertIn('m.get("role") == "finance"', fn)
         self.assertIn('m.get("status") == "active"', fn)
+
+    def test_but_an_organisation_with_none_is_not_left_unpaid(self):
+        # The console lets an owner settle for exactly this reason. Without a
+        # fallback the smallest accounts - the ones most likely to be one
+        # person - would be the only ones this never reaches.
+        fn = self.digest.split("def _finance(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('m.get("role") == "owner"', fn)
+        self.assertIn("if finance:", fn)
 
     def test_one_organisations_failure_is_not_the_others(self):
         body = self.digest.split("def lambda_handler(", 1)[1]
         self.assertIn("except Exception:", body)
         self.assertIn("digest failed for", body)
 
-    def test_the_subject_says_how_many_need_a_person(self):
-        # "2 new expense claims" is a count; "1 to review" is the reason to
-        # open it now rather than later.
-        fn = self.notify.split("def submissions_digest(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn("to review", fn)
-        self.assertIn('c.get("needs_review")', fn)
-
-    def test_a_claim_still_being_read_is_not_called_reviewable(self):
-        # Nobody can act on it yet, and calling for a reviewer on a claim with
-        # no figures wastes the trip.
-        fn = self.digest.split("def _line(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn('unread = status in ("queued", "auditing")', fn)
-
     def test_it_is_email_only(self):
-        # A working list, not an alert - it does not belong on somebody's
-        # phone at the weekend.
+        # Money waiting to be paid is not a reason to buzz somebody's phone on
+        # a Saturday. It is a list they work through when they sit down to it.
         fn = self.notify.split("def email_digest(", 1)[1]
         self.assertIn("_send_email(", fn)
         self.assertNotIn("_send_whatsapp", fn)
@@ -96,6 +148,108 @@ class FinanceIsToldInBatchesNotPerReceipt(unittest.TestCase):
         self.assertIn("intake_table.grant_read_data(digest_fn)", self.stack)
         self.assertIn("users_table.grant_read_data(digest_fn)", self.stack)
         self.assertIn("orgs_table.grant_read_write_data(digest_fn)", self.stack)
+
+
+class TheFigureIsTheOneTheTabShows(unittest.TestCase):
+    """An email saying three are waiting over a badge saying two is worse than
+    no email at all. `_cleared_at` follows `payableClaims` line for line."""
+
+    def setUp(self):
+        import digest, notify
+        self.digest, self.notify = digest, notify
+
+    def _row(self, **over):
+        row = {
+            "reference": "Mobil80-Exp-48", "submitted_by": "rehaan@mobil80.com",
+            "receipt": {"vendor": "Cursor"},
+            "review_action": "approved", "review_by_name": "Riyad Rasheed",
+            "review_at": 1790000237, "audited_at": 1789986051,
+            "approved_total": "23.60",
+            "payout_value": {"amount": "2266.47", "currency": "INR",
+                             "rate": "96.03698000", "from": "USD"},
+            "verdict": {"currency": "USD", "receipt_total": "23.60",
+                        "reimbursable_total": "23.60", "verdict": "needs_review",
+                        "violations": []},
+        }
+        row.update(over)
+        return row
+
+    def test_an_approved_claim_is_waiting_from_the_moment_it_was_approved(self):
+        self.assertEqual(self.digest._cleared_at(self._row()), 1790000237000)
+
+    def test_a_settled_one_is_not_waiting(self):
+        self.assertEqual(self.digest._cleared_at(self._row(outcome="settled")), 0)
+
+    def test_a_rejected_one_is_not_waiting(self):
+        self.assertEqual(self.digest._cleared_at(self._row(review_action="rejected")), 0)
+
+    def test_a_companion_document_is_not_a_second_payment(self):
+        self.assertEqual(
+            self.digest._cleared_at(self._row(companion_of="Mobil80-Exp-47")), 0)
+
+    def test_an_agent_cleared_claim_is_waiting_from_when_it_was_audited(self):
+        row = self._row(review_action="", verdict={
+            "currency": "INR", "reimbursable_total": "1999.00",
+            "verdict": "approved", "violations": []})
+        self.assertEqual(self.digest._cleared_at(row), 1789986051000)
+
+    def test_but_not_one_the_agent_could_not_release(self):
+        row = self._row(review_action="", verdict={
+            "currency": "INR", "reimbursable_total": "1999.00",
+            "verdict": "approved",
+            "violations": [{"blocks_automatic_decision": True}]})
+        self.assertEqual(self.digest._cleared_at(row), 0)
+
+    def test_the_figure_is_what_leaves_the_account(self):
+        # USD 23.60 at the rate stamped on the claim, not today's.
+        self.assertEqual(self.digest._owed(self._row()), ("2266.47", "INR"))
+
+    def test_a_rupee_claim_needs_no_conversion(self):
+        row = self._row(approved_total="1999.00", verdict={
+            "currency": "INR", "reimbursable_total": "1999.00",
+            "verdict": "approved", "violations": []},
+            payout_value={"currency": "INR"})
+        self.assertEqual(self.digest._owed(row), ("1999.00", "INR"))
+
+    def test_what_a_reviewer_released_beats_what_the_engine_allowed(self):
+        # A claim approved over a cap pays what the person approved. Reading
+        # the engine's figure would report nil for every overridden claim.
+        row = self._row(approved_total="23.60", verdict={
+            "currency": "USD", "reimbursable_total": "0.00",
+            "verdict": "needs_review", "violations": []})
+        self.assertEqual(self.digest._owed(row)[0], "2266.47")
+
+    def test_a_claim_with_no_rate_reports_no_figure_rather_than_nil(self):
+        row = self._row(payout_value={"currency": "INR", "rate": "0"})
+        self.assertEqual(self.digest._owed(row), ("", "USD"))
+
+    def test_and_the_total_says_it_skipped_one(self):
+        lines = [{"total": "100.00", "currency": "INR"},
+                 {"total": "", "currency": "USD"}]
+        self.assertEqual(self.notify._total_of(lines), "INR 100.00 (and 1 with no rate)")
+
+    def test_a_total_across_two_currencies_is_not_offered(self):
+        # It would be a number nobody could reconcile against anything.
+        lines = [{"total": "100.00", "currency": "INR"},
+                 {"total": "20.00", "currency": "USD"}]
+        self.assertEqual(self.notify._total_of(lines), "")
+
+    def test_the_email_names_who_released_each_claim(self):
+        # A claim the agent cleared went out on the policy alone; one a person
+        # approved has a name against the judgment.
+        line = self.digest._line(self._row())
+        self.assertEqual(line["cleared_by"], "Riyad Rasheed")
+        agent = self.digest._line(self._row(review_action=""))
+        self.assertEqual(agent["cleared_by"], "Expenze agent")
+
+    def test_the_email_reads_as_a_working_list(self):
+        note = self.notify.ready_to_pay_digest(
+            [self.digest._line(self._row())], "Mobil80 Solutions")
+        self.assertIn("1 claim ready to pay", note["subject"])
+        self.assertIn("Mobil80-Exp-48", note["text"])
+        self.assertIn("INR 2266.47", note["text"])
+        self.assertIn("cleared by Riyad Rasheed", note["text"])
+        self.assertIn("https://expenze.ai", note["text"])
 
 
 class ADuplicateNamesAClaimSomebodyCanFind(unittest.TestCase):

@@ -353,7 +353,10 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
         # second pass that assigns to the same controls writes `false` back
         # over it, which is how a settled claim came to offer an editable
         # Expense type again.
-        self.assertIn("paid || unread || saving || !reviewingHere()", frozen)
+        # `deciding` joined it: while a decision is in flight the controls
+        # are as dead as they are during a save, and for the same reason.
+        self.assertIn("paid || unread || saving || deciding || !reviewingHere()",
+                      frozen)
 
     def test_the_route_is_wired(self):
         with open(os.path.join(ROOT, "expensifyai", "stack.py"), encoding="utf-8") as h:
@@ -452,16 +455,31 @@ class ASettledClaimSaysSettled(unittest.TestCase):
         # An agent-cleared claim that was then paid has no `decision` at all.
         self.assertIn("if (decision || settlementStage(sub)) {", self.app)
 
-    def test_settlement_refuses_rather_than_reopens(self):
-        # Reopen was here, and it undid the approval - the claim went back to
-        # the review queue. Wrong instrument for what stops a payment at this
-        # stage: a bill that never arrived, or paper that does not match, are
-        # not judgments a reviewer can remake, because neither is about the
-        # claim as submitted.
+    def test_an_approved_claim_offers_no_way_to_undo_the_approval(self):
+        # This row held Reopen, which put the claim back in the queue, then a
+        # rejection at settlement, then "Reject anyway". All three were answers
+        # to "what if the bill never arrives", and none of them belonged in
+        # front of the person who had just decided the claim.
+        #
+        # A decision is a decision. The reviewer read the bill, the findings
+        # and the figures and said yes; the submitter has been told so in
+        # writing and is expecting the money. Offering to take it back in the
+        # same breath makes the approval look provisional, and it put the one
+        # red button on the screen beside a tick - read, reasonably, as the
+        # approval having failed.
         self.assertNotIn('decide(sub, "Reopen"', self.app)
-        self.assertIn('if (mayReview && !isPaid(sub) && decision && decision.action !== "Rejected") {',
-                      self.app)
-        self.assertIn('openReasonForm(sub, "settle_rejected", "Rejected")', self.app)
+        self.assertNotIn('no.textContent = "Reject anyway"', self.app)
+        decided = self.app.split("} else if (decision || settlementStage(sub)) {", 1)[1] \
+                          .split("} else if (agentMayRelease(sub)) {", 1)[0]
+        self.assertNotIn("settle_rejected", decided)
+
+    def test_a_claim_the_agent_released_can_still_be_refused(self):
+        # Different question. That claim has never been in front of a person,
+        # so refusing it is not undoing anybody's decision - it is the only
+        # human check there is on it.
+        agent = self.app.split("} else if (agentMayRelease(sub)) {", 1)[1] \
+                        .split("} else if (unread) {", 1)[0]
+        self.assertIn('openReasonForm(sub, "settle_rejected", "Rejected")', agent)
 
 
 class TheControlsOnAClosedClaimAreInert(unittest.TestCase):

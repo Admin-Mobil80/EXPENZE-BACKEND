@@ -147,18 +147,20 @@ class ApprovingDoesNotHandYouAPaymentRun(unittest.TestCase):
         self.assertNotIn('if (claimFrom !== "payments") return;', self.fn)
         self.assertIn('[["Record payment", "primary", "pay"]]', self.fn)
 
-    def test_the_reviewer_can_still_change_their_mind(self):
-        # Reject stays on the actions row: approving and immediately thinking
-        # better of it is a review action, and it is the one this screen is
-        # for.
+    def test_a_decided_claim_offers_no_way_to_undo_the_decision(self):
+        # Reject lived on this row - as Reopen, then as a rejection at
+        # settlement, then as "Reject anyway" - and none of those belonged in
+        # front of the person who had just decided the claim. The reviewer
+        # read the bill and said yes, and the submitter has been told so in
+        # writing. Offering to take it back in the same breath makes the
+        # approval look provisional, which it is not.
+        #
         # To the end of the decided-claim branch, not a fixed slice: a branch
         # added above it should not decide whether this passes.
         actions = self.app.split('const abox = $("actions")', 1)[1].split(
             "} else if (agentMayRelease(sub)) {", 1)[0]
-        self.assertIn('decision.action !== "Rejected"', actions)
-        # "Reject anyway", because a bare "Reject" beside a tick reads as the
-        # approval not having taken - which is how it was read.
-        self.assertIn('no.textContent = "Reject anyway"', actions)
+        self.assertNotIn("Reject anyway", actions)
+        self.assertNotIn("settle_rejected", actions)
 
     def test_but_it_is_not_the_only_thing_on_offer(self):
         # It was, and that is the whole complaint: a tick, a name, and one red

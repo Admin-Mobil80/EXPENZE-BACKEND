@@ -394,32 +394,80 @@ def low_credits_notice(claim: dict[str, Any]) -> dict[str, str]:
             "text": text, "whatsapp": text}
 
 
-def submissions_digest(claims: list[dict[str, Any]], org_name: str) -> dict[str, str]:
-    """What arrived since the last time finance was told.
+def ready_to_pay_digest(claims: list[dict[str, Any]], org_name: str,
+                        outstanding: list[dict[str, Any]] | None = None
+                        ) -> dict[str, str]:
+    """What cleared for settlement since finance was last told.
 
-    One message for a window rather than one per receipt. A team that sends
-    forty bills on a Friday would otherwise send forty emails, and the fortieth
-    is read by nobody - which makes the first thirty-nine worthless too, since
-    the habit it teaches is to filter the lot.
+    This was a digest of *arrivals*, and it was the wrong event. A receipt
+    coming in is not finance's business - it may still be with the agent, it
+    may be about to be refused, and in every case somebody else decides before
+    there is anything to pay. What they were given was a stream they could not
+    act on, and a stream nobody can act on is one they learn to filter, which
+    takes the message that mattered with it.
 
-    The state of each claim is in the line, because "a receipt arrived" is not
-    by itself something finance can act on. What they need to know is which of
-    them are sitting in the queue waiting for a person.
+    A claim clearing for settlement is the moment the work becomes theirs, so
+    that is the moment this fires.
+
+    One message for a window rather than one per claim, for the reason the
+    arrivals digest had it right: a team whose month is approved in one sitting
+    would otherwise send forty emails, and the fortieth is read by nobody.
+
+    The standing total rides along with the new ones. A digest that reports
+    only the delta makes the reader keep the running figure in their own head,
+    and the question they open this to answer is "how much do we owe", not
+    "how much more than last time".
     """
     n = len(claims)
-    waiting = [c for c in claims if c.get("needs_review")]
-    subject = (f"{n} new expense claim{'' if n == 1 else 's'}"
-               + (f" · {len(waiting)} to review" if waiting else ""))
+    subject = (f"{n} claim{'' if n == 1 else 's'} ready to pay"
+               + (f" \u00b7 {org_name}" if org_name else ""))
 
-    lines = [f"{n} receipt{'' if n == 1 else 's'} came in to {org_name}.", ""]
+    lines = [f"{n} claim{'' if n == 1 else 's'} cleared for settlement at "
+             f"{org_name}.", ""]
     for c in claims:
         ref = c.get("reference") or c.get("submission_id", "")
         money = f"{c.get('currency', '')} {c.get('total', '')}".strip()
-        state = "needs review" if c.get("needs_review") else (c.get("state") or "")
-        lines.append(" · ".join(p for p in (
-            ref, c.get("who", ""), c.get("vendor", ""), money, state) if p))
-    lines += ["", "Open Expenze to review them: https://expenze.ai"]
+        # An amount that could not be worked out is named as that, rather than
+        # left blank for the reader to read as nil.
+        if not c.get("total"):
+            money = f"{c.get('currency', '')} — no rate".strip()
+        lines.append(" \u00b7 ".join(p for p in (
+            ref, c.get("who", ""), c.get("vendor", ""), money,
+            f"cleared by {c['cleared_by']}" if c.get("cleared_by") else "",
+        ) if p))
+
+    total = _total_of(outstanding or claims)
+    if total:
+        count = len(outstanding or claims)
+        lines += ["", f"{count} claim{'' if count == 1 else 's'} waiting to be "
+                      f"paid in all, {total}."]
+    lines += ["", "Settle them here: https://expenze.ai"]
     return {"subject": subject, "text": "\n".join(lines)}
+
+
+def _total_of(claims: list[dict[str, Any]]) -> str:
+    """The sum of a list of digest lines, where they share one currency.
+
+    They do, in practice: every figure on them has already been converted to
+    the currency the payout leaves in. The guard is for the claim whose rate
+    could not be had - it carries no amount at all, and a total that quietly
+    skipped it would be a figure finance could not reconcile against the tab.
+    """
+    amounts, currencies, stuck = [], set(), 0
+    for c in claims:
+        if not c.get("total"):
+            stuck += 1
+            continue
+        try:
+            amounts.append(Decimal(str(c["total"])))
+        except (ArithmeticError, ValueError):
+            stuck += 1
+            continue
+        currencies.add(str(c.get("currency") or ""))
+    if not amounts or len(currencies) != 1:
+        return ""
+    total = f"{currencies.pop()} {sum(amounts):,.2f}".strip()
+    return total + (f" (and {stuck} with no rate)" if stuck else "")
 
 
 # No "queried". Nothing in the product asks a submitter anything any more:
@@ -646,9 +694,14 @@ def record(table: Any, submission_id: str, result: dict[str, Any]) -> None:
                          notice.get("kind"), submission_id)
 
 
-def email_digest(to: str, claims: list[dict[str, Any]], org_name: str) -> bool:
-    """Send one digest. Email only - this is a working list, not an alert."""
+def email_digest(to: str, claims: list[dict[str, Any]], org_name: str,
+                 outstanding: list[dict[str, Any]] | None = None) -> bool:
+    """Send one digest. Email only - this is a working list, not an alert.
+
+    Money waiting to be paid is not a reason to buzz somebody's phone on a
+    Saturday. It is a list they work through when they sit down to it.
+    """
     if not to or not claims:
         return False
-    notice = submissions_digest(claims, org_name)
+    notice = ready_to_pay_digest(claims, org_name, outstanding)
     return bool(_send_email(to, notice["subject"], notice["text"]))
