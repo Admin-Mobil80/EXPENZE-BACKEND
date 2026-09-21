@@ -44,7 +44,7 @@ class TheServerAcceptsIt(unittest.TestCase):
         self.assertIn('"disputed"', actions)
         # Which means the owner/finance gate above already covers it: a
         # submitter cannot dispute the agent into re-examining their own claim.
-        self.assertIn('if action in REVIEW_ACTIONS and not runs_the_org(acting)',
+        self.assertIn('action not in DECIDING_ACTIONS \\\n            and not runs_the_org(acting)',
                       self.review)
 
     def test_it_needs_a_reason(self):

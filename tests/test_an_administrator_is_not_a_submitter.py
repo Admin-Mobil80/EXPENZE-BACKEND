@@ -100,8 +100,11 @@ class TheServerAsksTheRankToo(unittest.TestCase):
             self.assertIn("runs_the_org(", block, name)
 
     def test_deciding_a_claim_is_ranked(self):
-        self.assertIn("if action in REVIEW_ACTIONS and not runs_the_org(acting):",
+        # Deciding one is ranked higher still - an owner's or an
+        # administrator's, never a finance executive's. See `may_review`.
+        self.assertIn("if action in DECIDING_ACTIONS and not may_review(acting):",
                       self.auth)
+        self.assertIn("and not runs_the_org(acting):", self.auth)
 
     def test_the_refusals_name_the_role_that_is_now_allowed(self):
         # A message that lists two roles when three are allowed is a support

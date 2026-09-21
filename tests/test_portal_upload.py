@@ -169,7 +169,7 @@ class MoneyIsReleasedWhereTheClaimIs(unittest.TestCase):
 
     def test_only_a_reviewer_and_only_where_something_is_owed(self):
         body = self.app.split("function renderSettleOnClaim(", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("!mayReview || c.outstanding <= 0", body)
+        self.assertIn("!maySettle || c.outstanding <= 0", body)
 
     def test_the_forms_are_no_longer_table_rows(self):
         # They were a <tr> spanning the settlement list; nothing opens them

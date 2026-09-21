@@ -169,6 +169,29 @@ def runs_the_org(who: Any) -> bool:
     return rank_of(who) >= RANK["finance"]
 
 
+def may_review(who: Any) -> bool:
+    """Whether this person decides claims, as opposed to paying them.
+
+    Reviewing and paying are two jobs, and giving both to one person removes
+    the only check the product has: a reviewer decides what the company owes,
+    and somebody else moves the money. A finance executive who could also
+    approve could approve their own work into their own payment run, and
+    nothing downstream would notice.
+
+    So the floor is administrator, not finance - deliberately higher than
+    `runs_the_org`, which is the gate for everything a finance executive does
+    need: the settlement, the payment run, the people list, the reports.
+
+    One review action is not here, and deliberately. Sending a claim *back*
+    for review - `disputed` - is a finance executive saying they do not agree
+    with what the agent cleared, and it decides nothing: it hands the claim to
+    the people whose job deciding is. Taking that away would leave finance
+    with pay-it-or-refuse-it on a claim they doubt, which is the exact
+    position that button was built to end.
+    """
+    return rank_of(who) >= RANK["admin"]
+
+
 def may_manage(actor_role: Any, target_role: Any) -> bool:
     """Whether somebody may act on a person holding this role.
 
@@ -1878,10 +1901,12 @@ def _claim_retype(token: str, body: dict[str, Any], origin: str | None) -> dict[
     acting = identity.resolve_by_email(actor, channel=None)
     if not acting:
         return _reply(403, {"error": "No membership for this account."}, origin)
-    # Re-tagging changes what a claim is worth, so it is a reviewer's act.
-    if not runs_the_org(acting):
+    # Re-tagging changes what a claim is worth, so it is a reviewer's act -
+    # and reviewing is not a finance executive's job. See `may_review`.
+    if not may_review(acting):
         return _reply(403, {
-            "error": "Only an owner, administrator or finance executive can set the expense type."}, origin)
+            "error": "Only an owner or administrator can set the expense type."},
+            origin)
 
     # The organisation's own types, not the built-ins. Now that a policy is
     # stored per account, checking against `DEFAULT_RULES` would refuse a type
@@ -2017,6 +2042,11 @@ def _as_decimal(value: Any) -> Decimal:
 # now approves, refuses, or hands it back to the agent.
 REVIEW_ACTIONS = ("approved", "rejected", "reopened", "disputed")
 
+# The ones that decide whether somebody is paid. `disputed` is not among them:
+# it hands the claim to a reviewer rather than deciding it, which is why a
+# finance executive may do it and may not do these. See `may_review`.
+DECIDING_ACTIONS = ("approved", "rejected", "reopened")
+
 # And the one a person makes about their own. Separate because the
 # authorisation is the opposite way round: a Finance Executive may not withdraw
 # an employee's claim on their behalf, and an employee may not approve one.
@@ -2101,9 +2131,23 @@ def _claim_review(token: str, body: dict[str, Any], origin: str | None) -> dict[
     if action not in REVIEW_ACTIONS + CLAIMANT_ACTIONS:
         return _reply(400, {"error": "Say what is being done to this claim."}, origin)
 
-    if action in REVIEW_ACTIONS and not runs_the_org(acting):
+    # Deciding a claim is a reviewer's act; sending one back is not.
+    #
+    # `disputed` is a finance executive saying they do not agree with what the
+    # agent cleared. It decides nothing - it puts the claim in front of the
+    # people whose job that is - so it sits at the lower gate. Everything else
+    # here settles whether somebody is paid, and that is an owner's or an
+    # administrator's to settle.
+    if action in DECIDING_ACTIONS and not may_review(acting):
         return _reply(403, {
-            "error": "Only an owner, administrator or finance executive can decide a claim."
+            "error": "Only an owner or administrator can decide a claim. A "
+                     "finance executive can send it back for review."
+        }, origin)
+    if action in REVIEW_ACTIONS and action not in DECIDING_ACTIONS \
+            and not runs_the_org(acting):
+        return _reply(403, {
+            "error": "Only an owner, administrator or finance executive can "
+                     "send a claim back for review."
         }, origin)
 
     # A rejection and a question are both useless to the employee without the

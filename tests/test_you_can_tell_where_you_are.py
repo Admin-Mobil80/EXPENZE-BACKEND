@@ -131,7 +131,7 @@ class ApprovingDoesNotHandYouAPaymentRun(unittest.TestCase):
     def setUp(self):
         self.app = read("../PORTAL/app.html")
         self.fn = self.app.split(
-            "function renderSettleOnClaim(sub, mayReview) {", 1)[1].split(
+            "function renderSettleOnClaim(sub, maySettle) {", 1)[1].split(
             "\n}", 1)[0]
 
     def test_no_payment_controls_on_a_claim_opened_from_the_queue(self):

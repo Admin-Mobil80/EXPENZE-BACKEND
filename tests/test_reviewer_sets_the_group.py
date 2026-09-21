@@ -32,13 +32,13 @@ class TheControlIsOnTheClaimPage(unittest.TestCase):
 
     def test_it_is_hidden_for_an_organisation_with_no_groups(self):
         # An empty dropdown is a question about nothing.
-        self.assertIn("gfield.hidden = !groups.length || settlingHere;", self.app)
+        self.assertIn("gfield.hidden = !groups.length || payingHere;", self.app)
 
     def test_and_hidden_again_where_the_payment_form_asks_the_same_thing(self):
         # Two dropdowns over one value six inches apart is a question about
         # which of them wins. At review this is the only one; at settlement it
         # belongs beside the amount and the reference.
-        self.assertIn("const settlingHere = reviewingHere() && !isPaid(sub)", self.app)
+        self.assertIn("const payingHere = settlingHere() && !isPaid(sub)", self.app)
         self.assertIn('id="sf-group"', self.app)
 
     def test_it_freezes_with_every_other_control(self):

@@ -118,7 +118,7 @@ class WithdrawingYourOwnClaim(unittest.TestCase):
 
     def test_the_reviewer_gate_applies_only_to_reviewer_actions(self):
         # Otherwise an ordinary member of staff cannot withdraw anything.
-        self.assertIn('action in REVIEW_ACTIONS and not runs_the_org(acting)',
+        self.assertIn('action in DECIDING_ACTIONS and not may_review(acting)',
                       self.body)
 
     def test_only_the_person_who_submitted_it_may_withdraw_it(self):
@@ -282,7 +282,9 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
 
     def test_only_a_reviewer_may_set_it(self):
         # It decides how the claim is reported and which budget pays it.
-        self.assertIn('not runs_the_org(acting)', self.retype)
+        # An administrator's, not a finance executive's: re-tagging is a
+        # review act and reviewing is not finance's job.
+        self.assertIn('not may_review(acting)', self.retype)
 
     def test_an_invented_type_is_refused(self):
         self.assertIn("Choose one of the configured expense types.", self.retype)

@@ -606,31 +606,57 @@ class ReviewingIsAScreenNotARole(unittest.TestCase):
 
     The same person wears both hats. Which hat they have on is a property of
     the screen they are on, not of the account they signed in with.
+
+    It is now two questions asked of the same screen, because two roles act on
+    a claim from it: whether it can be *decided* here, and whether a payment
+    can be *recorded* here. A finance executive answers no to the first and
+    yes to the second.
     """
 
     def setUp(self):
         with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as handle:
             self.source = handle.read()
-        self.fn = self.source.split("function reviewingHere() {", 1)[1].split("\n}", 1)[0]
+        self.screen = self.source.split(
+            "function aboutSomebodyElsesClaim() {", 1)[1].split("\n}", 1)[0]
 
     def test_the_decision_panel_asks_about_the_screen(self):
         self.assertIn("const mayReview = reviewingHere();", self.source)
 
     def test_the_review_queue_reviews(self):
-        self.assertIn('if (view === "queue") return true;', self.fn)
+        self.assertIn('if (view === "queue") return true;', self.screen)
 
     def test_my_expenses_does_not(self):
         # The claim page inherits the context it was opened from.
-        self.assertIn('if (view === "claim") return claimFrom !== "mine";', self.fn)
+        self.assertIn('if (view === "claim") return claimFrom !== "mine";',
+                      self.screen)
 
-    def test_a_member_of_staff_never_reviews_anywhere(self):
-        self.assertIn("if (!can.seeQueue()) return false;", self.fn)
+    def test_nothing_else_counts(self):
+        # Pending settlement has its own controls on its own rows; a claim
+        # opened from there goes to the claim page, handled above.
+        self.assertTrue(self.screen.rstrip().endswith("return false;"),
+                        self.screen)
 
-    def test_nothing_else_counts_as_reviewing(self):
-        # Pending settlement has its own Record payment and Reject; a claim
-        # opened from there goes to the claim page, handled above. Every other
-        # screen falls through to false.
-        self.assertTrue(self.fn.rstrip().endswith("return false;"), self.fn)
+    def test_a_member_of_staff_neither_reviews_nor_settles_anywhere(self):
+        review = self.source.split("function reviewingHere() {", 1)[1].split(
+            "\n}", 1)[0]
+        settle = self.source.split("function settlingHere() {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("can.review() && aboutSomebodyElsesClaim()", review)
+        self.assertIn("can.seeQueue() && aboutSomebodyElsesClaim()", settle)
+
+    def test_the_two_bars_are_different_heights(self):
+        # The whole point of the split. Deciding is an administrator's;
+        # recording a payment is a finance executive's.
+        block = self.source.split("const can = {", 1)[1].split("};", 1)[0]
+        self.assertIn("review:     () => rankOf(currentUser.tier) >= RANK.admin,",
+                      block)
+        self.assertIn("seeQueue:   () => rankOf(currentUser.tier) >= RANK.finance,",
+                      block)
+
+    def test_the_payment_controls_hang_on_the_lower_one(self):
+        # Gating them on `reviewingHere` would lock a finance executive out of
+        # the one job that is theirs.
+        self.assertIn("renderSettleOnClaim(sub, settlingHere());", self.source)
 
     def test_the_submitter_keeps_their_own_actions(self):
         # Withdraw is the claimant's, so it keys off whose claim it is - not
@@ -638,20 +664,17 @@ class ReviewingIsAScreenNotARole(unittest.TestCase):
         withdraw = self.source.split("wd.textContent = \"Withdraw\"", 1)[0]
         guard = withdraw.rsplit("if (", 1)[1]
         self.assertIn("isMine(sub)", guard)
-        # And only on the submitter's surface: taking a claim back is not what
-        # somebody is on Pending settlement to do, and the buttons beside it
-        # there release money.
         self.assertIn("!mayReview", guard)
 
     def test_a_claim_waiting_on_you_says_so_rather_than_blaming_finance(self):
         self.assertIn("Waiting on your answer above.", self.source)
 
-    def test_a_claim_waiting_on_somebody_else_says_only_that(self):
-        # It used to tell a reviewer to "decide this one from the Review
-        # queue" - directions to another screen, in place of the one thing
-        # they had actually been asked to do.
+    def test_a_finance_executive_is_told_why_they_cannot_act(self):
+        # "You will hear the outcome by email and WhatsApp" is the submitter's
+        # line, and they reach this branch too now.
+        self.assertIn("Awaiting review by an owner or administrator.",
+                      self.source)
         self.assertIn("In review. You will hear the outcome", self.source)
-
 
 class ButtonsLookLikeButtons(unittest.TestCase):
     """A secondary button was a white rectangle with a faint outline.
@@ -4346,7 +4369,7 @@ class TwoButtonsOneLabel(unittest.TestCase):
             "\n  return td;", 1)[0]
 
     def test_the_one_that_opens_a_form_says_so(self):
-        opener = self.app.split("function renderSettleOnClaim(sub, mayReview) {",
+        opener = self.app.split("function renderSettleOnClaim(sub, maySettle) {",
                                 1)[1].split("\n}", 1)[0]
         self.assertIn('b.textContent = open === kind ? "Cancel" : label + "\\u2026";',
                       opener)
