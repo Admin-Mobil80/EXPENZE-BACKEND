@@ -4312,3 +4312,53 @@ class EachCostCentreHasItsOwnColour(unittest.TestCase):
         # "not set" is not a sixth colour; it is the absence of one.
         self.assertIn('\'<span class="state off">not set</span>\'', self.app)
 
+class TwoButtonsOneLabel(unittest.TestCase):
+    """A claim settled in full by somebody who never saw the fields.
+
+    The actions row carried "Record payment", which opens a form. The form
+    appears directly beneath it, and the button that actually records
+    anything - at the end of the form's own grid - said "Record payment" too.
+    Two identical labels a few pixels apart, the second landing where the
+    first had just been clicked.
+
+    Pressing twice in the same spot settled a claim in full at the prefilled
+    amount, with the mode, the reference and the date left as they were. The
+    person doing it reported expecting "the entry boxes to record" - they had
+    not seen them.
+
+    So the first says it opens something, and the second says what it will do
+    with the figure currently in the box. A button that names the amount it is
+    about to record cannot be pressed by accident with the wrong number in it.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as handle:
+            self.app = handle.read()
+        self.form = self.app.split("function settleForm(c, ccy) {", 1)[1].split(
+            "\n  return td;", 1)[0]
+
+    def test_the_one_that_opens_a_form_says_so(self):
+        opener = self.app.split("function renderSettleOnClaim(sub, mayReview) {",
+                                1)[1].split("\n}", 1)[0]
+        self.assertIn('b.textContent = open === kind ? "Cancel" : label + "\\u2026";',
+                      opener)
+
+    def test_the_one_that_records_names_the_amount(self):
+        self.assertIn("Record ${", self.form)
+        self.assertIn("as paid", self.form)
+
+    def test_and_follows_the_box(self):
+        # Part settling is done by lowering the amount, so the figure on the
+        # button has to be the figure in the field.
+        self.assertIn('amtBox.addEventListener("input", nameTheAmount);', self.form)
+        self.assertIn("`Record ${fmt(Math.min(minor, c.outstanding), ccy)} as paid`",
+                      self.form)
+
+    def test_an_empty_amount_disables_it(self):
+        self.assertIn('goBtn.disabled = !(minor > 0);', self.form)
+        self.assertIn('"Enter an amount"', self.form)
+
+    def test_the_two_labels_are_not_the_same_string(self):
+        # The regression in one assertion.
+        self.assertNotIn('id="sf-go">Record payment</button>', self.app)
+
