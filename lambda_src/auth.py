@@ -2656,20 +2656,30 @@ def _credits_verify(token: str, body: dict[str, Any], origin: str | None) -> dic
 def _turnaround(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """How long this organisation takes to reimburse somebody, in days.
 
+    One figure for the whole organisation, over every claim ever submitted,
+    and the same figure wherever it is shown. It was briefly two - an
+    all-time one on My expenses and a period-scoped one on Reports - which is
+    two numbers that can disagree on two screens about one question.
+
     From the moment a receipt arrives to the moment the money is recorded as
-    paid - which is the whole of what the person who spent it experiences.
-    Measuring from approval instead would report the half of the wait that
-    this product is fastest at and hide the half it is not.
+    paid, which is the whole of what the person who spent it experiences.
+    Measuring from approval would report the half of the wait this product is
+    fastest at and hide the half it is not.
 
     The median, not the mean. One claim that sat over a holiday for three
     weeks drags an average far enough to make the figure useless, and the
-    question being asked is "how long will mine take", which is the middle of
-    the distribution rather than its centre of mass.
+    question is "how long will mine take" - the middle of the distribution
+    rather than its centre of mass.
 
-    Settled claims only. A rejected one was never reimbursed, and counting it
-    as a fast nil or a slow never would both be lies about a different thing.
+    **And what is still waiting, beside it.** Only a settled claim has an
+    elapsed time to measure, so a median over settled claims alone is the
+    classic survivorship lie: this account would have read "2 days" on the
+    strength of its one reimbursed claim while twenty-one others had been
+    waiting up to six. The count of those and the age of the oldest travel
+    with the figure so it cannot flatter - a fast median over a long queue is
+    a fact about the queue, not about the process.
 
-    Nothing is returned until there are three to go on. Two claims is not a
+    Nothing is returned until three claims have been settled. Two is not a
     median, and a product that says "typically 1 day" on the strength of one
     lucky Tuesday has told somebody something it cannot support.
     """
@@ -2690,33 +2700,60 @@ def _turnaround(rows: list[dict[str, Any]]) -> dict[str, Any]:
         n = int(value or 0)
         return n // 1000 if n > 10 ** 11 else n
 
-    spans = []
+    now = int(time.time())
+    spans, waiting = [], []
     for r in rows:
-        if str(r.get("outcome") or "") != "settled":
+        # Neither happened to a claim that was taken back or refused.
+        if str(r.get("review_action") or "") in ("rejected", "withdrawn"):
+            continue
+        # A companion is the second document of one purchase, not a second
+        # purchase, and counting it would count one wait twice.
+        if str(r.get("companion_of") or ""):
             continue
         sent = secs(r.get("received_at"))
-        paid = secs(r.get("outcome_at"))
-        if not sent or not paid:
+        if not sent:
             continue
-        # Clock skew and backdated settlements both produce negatives. A
-        # claim cannot be paid before it arrived, so the honest floor is nil.
-        spans.append(max(0, paid - sent))
+
+        if str(r.get("outcome") or "") == "settled":
+            paid = secs(r.get("outcome_at"))
+            if paid:
+                # Clock skew and backdated settlements both produce negatives.
+                # A claim cannot be paid before it arrived.
+                spans.append(max(0, paid - sent))
+            continue
+
+        # Cleared and not yet paid - by a reviewer, or by the agent with
+        # nobody having disagreed or corrected it since.
+        verdict = r.get("verdict") or {}
+        cleared = str(r.get("review_action") or "") == "approved" or (
+            verdict.get("verdict") == "approved"
+            and not r.get("pulled_back") and not r.get("corrected_at"))
+        if cleared:
+            waiting.append(max(0, now - sent))
+
+    def days(seconds: float) -> int:
+        # Whole days, with a floor of one: "0 days" reads as a missing value,
+        # and anything settled the same day is a day to somebody waiting.
+        return max(1, round(seconds / 86400))
+
+    outstanding = {
+        "waiting": len(waiting),
+        "waiting_oldest": days(max(waiting)) if waiting else 0,
+    }
 
     if len(spans) < 3:
-        return {"days": None, "claims": len(spans)}
+        return {"days": None, "claims": len(spans), **outstanding}
 
     spans.sort()
     mid = len(spans) // 2
     median = (spans[mid] if len(spans) % 2
               else (spans[mid - 1] + spans[mid]) / 2)
     return {
-        # Whole days, rounded to nearest, with a floor of one: "0 days" reads
-        # as a missing value, and anything settled the same day is a day as
-        # far as somebody waiting for money is concerned.
-        "days": max(1, round(median / 86400)),
+        "days": days(median),
         "claims": len(spans),
-        "fastest": max(1, round(spans[0] / 86400)),
-        "slowest": max(1, round(spans[-1] / 86400)),
+        "fastest": days(spans[0]),
+        "slowest": days(spans[-1]),
+        **outstanding,
     }
 
 

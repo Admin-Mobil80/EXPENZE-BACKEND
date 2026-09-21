@@ -232,45 +232,119 @@ class TheUnitsOfTheTwoTimestamps(unittest.TestCase):
         self.assertIn("return n // 1000 if n > 10 ** 11 else n", fn)
 
 
-class TheProcessMetricOnReports(unittest.TestCase):
-    """The other half of what was asked for.
+class OneFigureShownInTwoPlaces(unittest.TestCase):
+    """It was briefly two.
 
-    The box in My expenses answers "when do I get my money". This answers "how
-    are we doing", which is a different question with a different population:
-    scoped to the month on screen, like every other figure on that tab, rather
-    than the organisation's all-time figure the server sends.
+    An all-time organisation-wide figure on My expenses, and a period-scoped
+    one computed in the console for Reports. Period-scoping is right for every
+    other tile on that tab and wrong for this one: two numbers that can
+    disagree on two screens about one question. It is a property of the
+    organisation's process, so it is organisation-wide, over every claim ever
+    submitted, and computed once.
     """
 
     def setUp(self):
         self.app = read("../PORTAL/app.html")
-        self.fn = self.app.split("function renderTriage() {", 1)[1].split(
+        self.triage = self.app.split("function renderTriage() {", 1)[1].split(
             "\n}", 1)[0]
 
-    def test_it_sits_with_the_auto_clear_rate(self):
+    def test_reports_reads_the_server_figure(self):
+        self.assertIn("const t = TURNAROUND || {};", self.triage)
+
+    def test_it_no_longer_computes_its_own(self):
+        # The median lived here for one commit. Two implementations of one
+        # statistic is a pair that drifts.
+        self.assertNotIn("const spans = period", self.triage)
+        self.assertNotIn("spans.sort()", self.triage)
+
+    def test_it_says_the_figure_is_not_period_scoped(self):
+        # The banner above those tiles promises the period, so this one has to
+        # say it is the exception rather than let the banner imply otherwise.
+        self.assertIn("all claims, over ${t.claims} reimbursed", self.triage)
+
+    def test_the_card_exists_beside_the_auto_clear_rate(self):
         self.assertIn('<span class="k">Time to reimburse</span>', self.app)
         self.assertIn('id="t-days"', self.app)
 
-    def test_it_is_scoped_to_the_period_like_everything_else_there(self):
-        # The note above those tiles promises it.
-        self.assertIn("const spans = period", self.fn)
+    def test_three_is_the_floor_in_both_places(self):
+        self.assertIn("three needed for a median", self.triage)
+        box = self.app.split("function turnaroundBox() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('if (!t.days) return "";', box)
 
-    def test_it_normalises_the_two_timestamp_units(self):
-        self.assertIn("const secs = (n) => (n > 1e11 ? Math.round(n / 1000) : n);",
-                      self.fn)
 
-    def test_the_settled_instant_is_a_number_not_a_printed_date(self):
-        # `settlement.at` is "17 Sep", formatted for a row to print and
-        # useless to arithmetic.
-        self.assertIn('settledAt: s.outcome === "settled" ? (s.paid_at || 0) : 0,',
-                      self.app)
+class AMedianOverSettledClaimsAloneWouldFlatter(unittest.TestCase):
+    """The survivorship trap, which this account walked straight into.
 
-    def test_three_is_the_floor_here_too(self):
-        self.assertIn("if (spans.length < 3) {", self.fn)
-        self.assertIn("three needed for a median", self.fn)
+    Only a settled claim has an elapsed time to measure. So the median is over
+    settled claims - and on this account that was one reimbursed claim at
+    about two days, while twenty-one others had been waiting up to six. "2
+    days" would have been arithmetically correct and a lie about the process.
 
-    def test_it_says_how_many_it_is_based_on(self):
-        self.assertIn("Median receipt to payment, over ${spans.length} reimbursed",
-                      self.fn)
+    The count still waiting and the age of the oldest travel with the figure,
+    in both places. A fast median over a long queue is a fact about the queue.
+    """
+
+    def setUp(self):
+        import auth
+        self.turnaround = auth._turnaround
+        self.app = read("../PORTAL/app.html")
+
+    def test_what_is_waiting_is_counted(self):
+        import time
+        now = int(time.time())
+        rows = settled(2, 4, 9) + [
+            {"received_at": (now - 6 * DAY) * 1000,
+             "verdict": {"verdict": "approved"}}]
+        t = self.turnaround(rows)
+        self.assertEqual(4, t["days"])
+        self.assertEqual(1, t["waiting"])
+        self.assertEqual(6, t["waiting_oldest"])
+
+    def test_a_claim_nobody_has_cleared_is_not_waiting_to_be_paid(self):
+        # It is waiting to be decided, which is the review queue's figure.
+        import time
+        rows = settled(2, 4, 9) + [
+            {"received_at": (int(time.time()) - 6 * DAY) * 1000,
+             "verdict": {"verdict": "needs_review"}}]
+        self.assertEqual(0, self.turnaround(rows)["waiting"])
+
+    def test_nor_is_a_rejected_or_withdrawn_one(self):
+        import time
+        old = (int(time.time()) - 30 * DAY) * 1000
+        for action in ("rejected", "withdrawn"):
+            rows = settled(2, 4, 9) + [
+                {"received_at": old, "review_action": action,
+                 "verdict": {"verdict": "approved"}}]
+            self.assertEqual(0, self.turnaround(rows)["waiting"], action)
+
+    def test_nor_is_a_companion(self):
+        # The second document of one purchase is not a second wait.
+        import time
+        rows = settled(2, 4, 9) + [
+            {"received_at": (int(time.time()) - 6 * DAY) * 1000,
+             "companion_of": "Exp-18", "verdict": {"verdict": "approved"}}]
+        self.assertEqual(0, self.turnaround(rows)["waiting"])
+
+    def test_it_is_reported_even_with_no_median_yet(self):
+        # Which is this account exactly: one reimbursed, twenty-one waiting.
+        import time
+        rows = settled(2) + [{"received_at": (int(time.time()) - 6 * DAY) * 1000,
+                              "verdict": {"verdict": "approved"}}]
+        t = self.turnaround(rows)
+        self.assertIsNone(t["days"])
+        self.assertEqual(1, t["waiting"])
+
+    def test_reports_prints_it(self):
+        triage = self.app.split("function renderTriage() {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("still unpaid, oldest", triage)
+
+    def test_and_the_submitter_is_told_rather_than_flattered(self):
+        # They are the one waiting, so they are exactly who should not be
+        # given the comfortable half.
+        box = self.app.split("function turnaroundBox() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("t.waiting && t.waiting_oldest > t.days", box)
+        self.assertIn("some are waiting longer", box)
 
 
 if __name__ == "__main__":
