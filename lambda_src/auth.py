@@ -2445,7 +2445,11 @@ def _claim_outcome(token: str, body: dict[str, Any], origin: str | None) -> dict
     # looked up what they actually paid, which is the same act that makes the
     # record worth keeping. Checked here as well as in the console, because
     # the console is a page somebody can have open from before this shipped.
-    if kind == "settled" and not str(body.get("reference", "")).strip():
+    # Not on a float settlement: no transfer was made, so there is no line on
+    # any statement to tie it to and demanding a reference would only get a
+    # made-up one. The choice of source is the record there.
+    if (kind == "settled" and str(body.get("source", "")) != "float"
+            and not str(body.get("reference", "")).strip()):
         return _reply(400, {
             "error": "Give the transaction reference - the UTR, cheque number "
                      "or transaction id. It is what ties this claim to the "

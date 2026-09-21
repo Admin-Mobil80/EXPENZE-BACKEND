@@ -87,20 +87,46 @@ def settled_notice(claim: dict[str, Any]) -> dict[str, str]:
 
     claim_ref = str(claim.get("claim_ref") or "").strip()
     tail = f" ({claim_ref})" if claim_ref else ""
-    subject = (f"{paid} reimbursed — {vendor}{tail}" if not part
-               else f"{paid} part payment — {vendor}{tail}")
 
-    lines = [
-        f"{'Part of your' if part else 'Your'} expense claim for {vendor} has been reimbursed.",
-        "",
-        f"Paid:        {paid}",
-        f"Approved:    {approved}",
-    ]
+    # Set against the float they already hold, rather than paid to them.
+    #
+    # No money moved: they spent the company's cash and this is the company
+    # accounting for it. Telling them it "has been reimbursed" would have
+    # them waiting for a transfer that is never coming, and quoting a mode of
+    # payment and a bank reference for a transfer nobody made is worse - it
+    # invites them to go looking for it on a statement.
+    from_float = str(claim.get("source") or "") == "float"
+
+    if from_float:
+        subject = f"{paid} set against your float — {vendor}{tail}"
+        lines = [
+            f"{'Part of your' if part else 'Your'} expense claim for {vendor} "
+            "has been set against the cash advance you hold.",
+            "",
+            "No payment has been made to you - you spent this from the float, "
+            "and your advance has been reduced by it.",
+            "",
+            f"Set against:  {paid}",
+            f"Approved:     {approved}",
+        ]
+    else:
+        subject = (f"{paid} reimbursed — {vendor}{tail}" if not part
+                   else f"{paid} part payment — {vendor}{tail}")
+        lines = [
+            f"{'Part of your' if part else 'Your'} expense claim for {vendor} has been reimbursed.",
+            "",
+            f"Paid:        {paid}",
+            f"Approved:    {approved}",
+        ]
     if part:
         lines.append(f"Still owed:  {money(outstanding, ccy)}")
-    for label, key in (("Mode:", "mode"), ("Bank reference:", "reference"),
-                       ("Paid on:", "paid_on"), ("Settled by:", "settled_by"),
-                       ("Group:", "group"), ("Claim:", "claim_ref")):
+    # No mode and no bank reference on a float settlement: there was no
+    # transfer, so both would send somebody looking for one.
+    fields = ((("Accounted on:", "paid_on"),) if from_float
+              else (("Mode:", "mode"), ("Bank reference:", "reference"),
+                    ("Paid on:", "paid_on")))
+    for label, key in fields + (("Settled by:", "settled_by"),
+                                ("Group:", "group"), ("Claim:", "claim_ref")):
         value = str(claim.get(key) or "").strip()
         if value:
             lines.append(f"{label:<12} {value}")
@@ -111,9 +137,15 @@ def settled_notice(claim: dict[str, Any]) -> dict[str, str]:
               "", "Expenze - expenze.ai"]
 
     ref = _ref_line(claim)
-    short = ((f"{ref}. " if ref else "") + f"{paid} has been reimbursed for {vendor}."
-             + (f" {money(outstanding, ccy)} of this claim is still owed." if part else "")
-             + (f" Reference: {claim['reference']}." if claim.get("reference") else ""))
+    short = ((f"{ref}. " if ref else "")
+             + (f"{paid} for {vendor} has been set against your cash advance - "
+                "no payment is coming to you, your float is reduced by it."
+                if from_float
+                else f"{paid} has been reimbursed for {vendor}."
+                     + (f" {money(outstanding, ccy)} of this claim is still owed."
+                        if part else "")
+                     + (f" Reference: {claim['reference']}."
+                        if claim.get("reference") else "")))
 
     return {"subject": subject, "text": "\n".join(lines), "whatsapp": short}
 

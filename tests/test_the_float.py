@@ -297,8 +297,11 @@ class TheConsoleOffersTheChoiceWhereTheMoneyIsPaid(unittest.TestCase):
         self.assertNotIn("float0.in_hand", self.fn)
 
     def test_the_choice_reaches_the_server(self):
-        self.assertIn('source: (td.querySelector("#sf-source") || {}).value || "payout"',
-                      self.app)
+        self.assertIn('source: settlingFromFloat ? "float" : "payout",', self.app)
+        # Read from the control only while it is on screen. It is built with
+        # "Their float" first inside a hidden wrapper, so reading it blind
+        # says "float" for somebody who holds none.
+        self.assertIn("&& !srcWrap1.hidden", self.app)
         self.assertIn('source: detail.source || "payout",', self.app)
 
 
@@ -345,6 +348,70 @@ class TheFloatTabShowsItsWorking(unittest.TestCase):
 
     def test_read_only_for_everybody_else(self):
         self.assertIn("The float is a Finance Executive's to record.", self.fn)
+
+
+class AFloatSettlementIsNotAPayment(unittest.TestCase):
+    """The row described a transfer that did not happen.
+
+    Settling from the float moves no money - the holder already had it - and
+    the rest of the settlement row went on saying otherwise: mode "bank
+    transfer", a required UTR, "Paid on", a button reading "Record X as
+    paid", and a notice telling them their claim "has been reimbursed" with a
+    bank reference attached.
+
+    Every one of those sends somebody to their statement looking for a payment
+    nobody made, and puts a fiction in the record an auditor reads back. So
+    the whole row follows the choice.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.form = self.app.split("function settleForm(c, ccy) {", 1)[1].split(
+            "\n  return td;", 1)[0]
+        self.notify = read("lambda_src/notify.py")
+        self.notice = self.notify.split("def settled_notice(", 1)[1].split(
+            "\ndef ", 1)[0]
+
+    def test_the_mode_says_what_happened_and_cannot_be_changed(self):
+        self.assertIn('const FLOAT_MODE = "against float";', self.app)
+        self.assertIn("modeSel.value = onFloat ? FLOAT_MODE", self.form)
+        self.assertIn("modeSel.disabled = onFloat;", self.form)
+
+    def test_switching_back_restores_what_they_had_picked(self):
+        self.assertIn("modeSel.dataset.was", self.form)
+
+    def test_no_reference_is_demanded_or_kept(self):
+        self.assertIn("refBox2.disabled = onFloat;", self.form)
+        self.assertIn('if (onFloat) refBox2.value = "";', self.form)
+        self.assertIn("No transfer was made, so there is nothing to reference.",
+                      self.form)
+
+    def test_the_server_does_not_demand_one_either(self):
+        # The console is a page somebody can have open from before this.
+        outcome = read("lambda_src/auth.py").split("def _claim_outcome(", 1)[1].split(
+            "\ndef ", 1)[0]
+        self.assertIn('str(body.get("source", "")) != "float"', outcome)
+
+    def test_the_date_is_named_for_what_it_is(self):
+        # When the spend was accounted for, not when a transfer cleared.
+        self.assertIn('dateLbl.textContent = onFloat ? "Accounted on" : "Paid on";',
+                      self.form)
+
+    def test_the_button_does_not_say_paid(self):
+        self.assertIn("against the float`", self.form)
+
+    def test_and_neither_does_the_notice(self):
+        self.assertIn('from_float = str(claim.get("source") or "") == "float"',
+                      self.notice)
+        self.assertIn("set against your float", self.notice)
+        self.assertIn("No payment has been made to you", self.notice)
+
+    def test_the_notice_omits_the_mode_and_the_bank_reference(self):
+        self.assertIn('(("Accounted on:", "paid_on"),) if from_float', self.notice)
+
+    def test_the_whatsapp_line_too(self):
+        self.assertIn("no payment is coming to you, your float is reduced by it.",
+                      self.notice)
 
 
 if __name__ == "__main__":

@@ -4388,7 +4388,10 @@ class TwoButtonsOneLabel(unittest.TestCase):
     def test_an_empty_amount_or_reference_disables_it(self):
         # The reference is required now, and the button says which of the two
         # is missing rather than sitting dead with no explanation.
-        self.assertIn("goBtn.disabled = !(minor > 0) || !ref;", self.form)
+        # And a float settlement waives the reference: no transfer was
+        # made, so there is no line on any statement to tie it to.
+        self.assertIn("goBtn.disabled = !(minor > 0) || (!onFloat && !ref);",
+                      self.form)
         self.assertIn('"Enter an amount"', self.form)
         self.assertIn('"Enter the transaction reference"', self.form)
 
