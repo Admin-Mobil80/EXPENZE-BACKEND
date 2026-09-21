@@ -115,9 +115,11 @@ class TheConsolePortAgrees(unittest.TestCase):
             1)[1].split("\n}", 1)[0]
 
     def test_the_same_condition(self):
-        self.assertIn(
-            "if (receiptTotal === 0 && !decided.length && printed === null) {",
-            self.fn)
+        # No longer "and no lines at all": a line with no price against it is
+        # nought rather than an error now, so a delivery summary listing two
+        # items and no prices has lines and no amounts. A line with no amount
+        # on it is not an amount.
+        self.assertIn("if (receiptTotal === 0 && printed === null) {", self.fn)
 
     def test_first_in_the_list_there_too(self):
         self.assertIn('violations.unshift({ code:"nothing_read"', self.fn)
@@ -242,6 +244,63 @@ class ADecidedClaimIsNotMessagedAgain(unittest.TestCase):
         # The whole point of the acknowledgement is that the outcome follows.
         self.assertIn("notify.send(", self.fn)
         self.assertIn('"outcome"', self.fn)
+
+
+class ALineWithNoPriceIsNotAFailure(unittest.TestCase):
+    """Three vision calls to refuse a receipt whose total was legible.
+
+    A McDonald's order summary from a delivery app: "1 x 2 Iced Coffee",
+    "2 x McSpicy Chicken Burger", no prices against either, and the order
+    total - INR 749.54 - printed once at the bottom. The model read exactly
+    that: two lines, no amounts.
+
+        PolicyInputError: line_items[0].amount: '' is not a valid amount
+
+    The audit failed, was retried twice more, and the claim was parked in
+    `needs_human`. Rehaan was left looking at a bill worth nothing, and the
+    figure that would have settled it was on the photograph the whole time.
+
+    An unreadable line amount is nought now, and the line is kept - its
+    description is still worth showing a reviewer, and the printed grand total
+    decides the claim anyway. A cap that will not parse is still an error: it
+    came from our own console rather than a photograph, and reading it as
+    nought would turn "capped at 1,500" into "capped at nothing".
+    """
+
+    def test_the_mcdonalds_card_reads(self):
+        v = run(expense_type="meals", stated_total="749.54",
+                line_items=[{"description": "1 x 2 Iced Coffee", "amount": ""},
+                            {"description": "2 x McSpicy Chicken Burger",
+                             "amount": ""}])
+        self.assertEqual("749.54", v["receipt_total"])
+        self.assertEqual([], codes(v))
+
+    def test_the_lines_are_kept_for_the_reviewer(self):
+        v = run(expense_type="meals", stated_total="749.54",
+                line_items=[{"description": "1 x 2 Iced Coffee", "amount": ""}])
+        self.assertEqual("1 x 2 Iced Coffee", v["line_items"][0]["description"])
+        self.assertEqual("0.00", v["line_items"][0]["amount"])
+
+    def test_with_no_total_either_it_is_nothing_read(self):
+        # The safety net. Priceless lines must not become a silent zero.
+        v = run(expense_type="meals", stated_total="",
+                line_items=[{"description": "1 x 2 Iced Coffee", "amount": ""}])
+        self.assertIn("nothing_read", codes(v))
+
+    def test_a_cap_that_will_not_parse_is_still_an_error(self):
+        with self.assertRaises(policy.PolicyInputError):
+            policy._money("abc", "cap")
+
+    def test_a_negative_line_still_counts_as_one(self):
+        # The discount lines this function already existed to allow.
+        v = run(expense_type="software_subscription", stated_total="",
+                line_items=[{"description": "Max plan", "amount": "200.00"},
+                            {"description": "Unused time", "amount": "-46.12"}])
+        self.assertEqual("153.88", v["receipt_total"])
+
+    def test_a_negative_cap_is_still_refused(self):
+        with self.assertRaises(policy.PolicyInputError):
+            policy._money("-50", "cap")
 
 
 if __name__ == "__main__":

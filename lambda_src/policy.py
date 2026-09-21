@@ -138,10 +138,35 @@ def _money(value: Any, field: str, *, signed: bool = False) -> Decimal:
     A cap is not such a place. A rule saying somebody may spend minus fifty is
     not a rule anybody meant to write, and taking it at face value would
     approve every claim of that type in silence.
+
+    `signed` also decides what happens to an amount that will not parse at
+    all, and for the same reason: which side of the line the number came from.
+
+    A line item's amount comes off a photograph. A McDonald's order summary
+    from a delivery app lists "1 x 2 Iced Coffee" and "2 x McSpicy Chicken
+    Burger" with no prices against them at all - only the order total, INR
+    749.54, printed once at the bottom. The model read exactly that: two
+    lines, no amounts. This raised, the audit failed, and the claim was
+    retried twice more and parked in `needs_human` - three vision calls to
+    refuse a receipt whose total was legible the whole time, and a claimant
+    left looking at a bill worth nothing.
+
+    So an unreadable line amount is nought and the line is kept: the
+    description is still worth showing a reviewer, and the printed grand total
+    decides the claim anyway. Nothing is silently lost by this - a receipt
+    with no line amounts *and* no printed total raises `nothing_read`, which
+    says so in as many words.
+
+    A cap that will not parse is a different thing entirely. It came from our
+    own console, not from a photograph, and reading it as nought would turn
+    "capped at 1,500" into "capped at nothing" and refuse every claim of that
+    type. That stays an error.
     """
     try:
         amount = Decimal(str(value))
     except (InvalidOperation, TypeError):
+        if signed:
+            return Decimal("0.00")
         raise PolicyInputError(f"{field}: {value!r} is not a valid amount")
     if amount.is_nan() or amount.is_infinite():
         raise PolicyInputError(f"{field}: {value!r} is not a finite amount")
@@ -414,7 +439,15 @@ def evaluate_policy(
     #
     # Checked after `printed` is applied, so a receipt whose lines were
     # unreadable but whose grand total was legible is a normal claim.
-    if receipt_total == 0 and not decided and printed is None:
+    # Zero, whether or not descriptions came back with it.
+    #
+    # This asked for *no lines at all*, which was true until a line with no
+    # price stopped being an error and started being nought. A delivery
+    # summary listing two items and no prices, with no grand total either,
+    # then produced a claim for 0.00 carrying two line descriptions and no
+    # finding whatsoever - the exact silence this exists to break, restored by
+    # the fix above. A line with no amount on it is not an amount.
+    if receipt_total == 0 and printed is None:
         # First in the list, not last. `no_rule_for_expense_type` was appended
         # before this point and is the one a reviewer sees at the top - and on
         # a claim with no figures it is advice about the wrong control.
