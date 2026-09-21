@@ -2673,12 +2673,29 @@ def _turnaround(rows: list[dict[str, Any]]) -> dict[str, Any]:
     median, and a product that says "typically 1 day" on the strength of one
     lucky Tuesday has told somebody something it cannot support.
     """
+    def secs(value: Any) -> int:
+        """Epoch seconds, whatever unit the row happens to hold.
+
+        `received_at` is written in milliseconds and `outcome_at` in seconds -
+        two writers, two conventions, and nothing between them to notice.
+        Subtracting one from the other gives about minus fifty-six thousand
+        years, which `max(0, ...)` below then quietly turned into nought: every
+        span nil, the median nil, and this reporting a confident "1 day" for
+        an organisation that takes a fortnight.
+
+        Caught only because this account has one settled claim and the figure
+        stays silent below three. Normalised here rather than at the writers,
+        because rows already in the table carry both.
+        """
+        n = int(value or 0)
+        return n // 1000 if n > 10 ** 11 else n
+
     spans = []
     for r in rows:
         if str(r.get("outcome") or "") != "settled":
             continue
-        sent = int(r.get("received_at") or 0)
-        paid = int(r.get("outcome_at") or 0)
+        sent = secs(r.get("received_at"))
+        paid = secs(r.get("outcome_at"))
         if not sent or not paid:
             continue
         # Clock skew and backdated settlements both produce negatives. A

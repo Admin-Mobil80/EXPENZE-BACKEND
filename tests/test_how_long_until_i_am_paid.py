@@ -189,5 +189,89 @@ class TheBoxSaysItPlainly(unittest.TestCase):
         self.assertIn("TURNAROUND = subs.data.turnaround || null;", self.app)
 
 
+class TheUnitsOfTheTwoTimestamps(unittest.TestCase):
+    """`received_at` is milliseconds and `outcome_at` is seconds.
+
+    Two writers, two conventions, and nothing between them to notice.
+    Subtracting one from the other gives about minus fifty-six thousand years,
+    which the floor at nought then quietly turned into a span of nil: every
+    claim instant, the median nil, and the product reporting a confident
+    "1 day" for an organisation that takes a fortnight.
+
+    It surfaced only because this account has one settled claim and the figure
+    stays silent below three. A clamp that makes a wrong answer look like a
+    plausible one is worse than no clamp, so the normalisation happens before
+    it.
+    """
+
+    def setUp(self):
+        import auth
+        self.turnaround = auth._turnaround
+
+    def test_the_real_row_reads_as_days_not_nil(self):
+        # Mobil80-Exp-1 as it is actually stored: ms in, seconds out, and
+        # 1.75 days between them.
+        rows = [{"outcome": "settled",
+                 "received_at": 1789477019787, "outcome_at": 1789628056}] * 3
+        self.assertEqual(2, self.turnaround(rows)["days"])
+
+    def test_both_spellings_give_the_same_answer(self):
+        ms, sec = 1789477019787, 1789477019
+        in_ms = [{"outcome": "settled", "received_at": ms,
+                  "outcome_at": sec + d * DAY} for d in (2, 4, 9)]
+        in_sec = [{"outcome": "settled", "received_at": sec,
+                   "outcome_at": sec + d * DAY} for d in (2, 4, 9)]
+        self.assertEqual(self.turnaround(in_ms)["days"],
+                         self.turnaround(in_sec)["days"])
+        self.assertEqual(4, self.turnaround(in_ms)["days"])
+
+    def test_the_normaliser_runs_before_the_floor(self):
+        fn = read("lambda_src/auth.py").split("def _turnaround(", 1)[1].split(
+            "\ndef ", 1)[0]
+        self.assertLess(fn.index("def secs("), fn.index("max(0, paid - sent)"))
+        self.assertIn("return n // 1000 if n > 10 ** 11 else n", fn)
+
+
+class TheProcessMetricOnReports(unittest.TestCase):
+    """The other half of what was asked for.
+
+    The box in My expenses answers "when do I get my money". This answers "how
+    are we doing", which is a different question with a different population:
+    scoped to the month on screen, like every other figure on that tab, rather
+    than the organisation's all-time figure the server sends.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split("function renderTriage() {", 1)[1].split(
+            "\n}", 1)[0]
+
+    def test_it_sits_with_the_auto_clear_rate(self):
+        self.assertIn('<span class="k">Time to reimburse</span>', self.app)
+        self.assertIn('id="t-days"', self.app)
+
+    def test_it_is_scoped_to_the_period_like_everything_else_there(self):
+        # The note above those tiles promises it.
+        self.assertIn("const spans = period", self.fn)
+
+    def test_it_normalises_the_two_timestamp_units(self):
+        self.assertIn("const secs = (n) => (n > 1e11 ? Math.round(n / 1000) : n);",
+                      self.fn)
+
+    def test_the_settled_instant_is_a_number_not_a_printed_date(self):
+        # `settlement.at` is "17 Sep", formatted for a row to print and
+        # useless to arithmetic.
+        self.assertIn('settledAt: s.outcome === "settled" ? (s.paid_at || 0) : 0,',
+                      self.app)
+
+    def test_three_is_the_floor_here_too(self):
+        self.assertIn("if (spans.length < 3) {", self.fn)
+        self.assertIn("three needed for a median", self.fn)
+
+    def test_it_says_how_many_it_is_based_on(self):
+        self.assertIn("Median receipt to payment, over ${spans.length} reimbursed",
+                      self.fn)
+
+
 if __name__ == "__main__":
     unittest.main()
