@@ -2653,6 +2653,56 @@ def _credits_verify(token: str, body: dict[str, Any], origin: str | None) -> dic
 # ---------------------------------------------------------------------------
 
 
+def _turnaround(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """How long this organisation takes to reimburse somebody, in days.
+
+    From the moment a receipt arrives to the moment the money is recorded as
+    paid - which is the whole of what the person who spent it experiences.
+    Measuring from approval instead would report the half of the wait that
+    this product is fastest at and hide the half it is not.
+
+    The median, not the mean. One claim that sat over a holiday for three
+    weeks drags an average far enough to make the figure useless, and the
+    question being asked is "how long will mine take", which is the middle of
+    the distribution rather than its centre of mass.
+
+    Settled claims only. A rejected one was never reimbursed, and counting it
+    as a fast nil or a slow never would both be lies about a different thing.
+
+    Nothing is returned until there are three to go on. Two claims is not a
+    median, and a product that says "typically 1 day" on the strength of one
+    lucky Tuesday has told somebody something it cannot support.
+    """
+    spans = []
+    for r in rows:
+        if str(r.get("outcome") or "") != "settled":
+            continue
+        sent = int(r.get("received_at") or 0)
+        paid = int(r.get("outcome_at") or 0)
+        if not sent or not paid:
+            continue
+        # Clock skew and backdated settlements both produce negatives. A
+        # claim cannot be paid before it arrived, so the honest floor is nil.
+        spans.append(max(0, paid - sent))
+
+    if len(spans) < 3:
+        return {"days": None, "claims": len(spans)}
+
+    spans.sort()
+    mid = len(spans) // 2
+    median = (spans[mid] if len(spans) % 2
+              else (spans[mid - 1] + spans[mid]) / 2)
+    return {
+        # Whole days, rounded to nearest, with a floor of one: "0 days" reads
+        # as a missing value, and anything settled the same day is a day as
+        # far as somebody waiting for money is concerned.
+        "days": max(1, round(median / 86400)),
+        "claims": len(spans),
+        "fastest": max(1, round(spans[0] / 86400)),
+        "slowest": max(1, round(spans[-1] / 86400)),
+    }
+
+
 def _submissions_list(token: str, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
     """Every receipt this organisation has, as one row each.
 
@@ -2675,6 +2725,14 @@ def _submissions_list(token: str, body: dict[str, Any], origin: str | None) -> d
     org_id = me.get("org_id", "")
     rows = _submissions_tbl_scan(org_id)
     everyone = runs_the_org(me)
+    # Computed before the rows are narrowed to the caller's own, and
+    # deliberately. How long this organisation takes to reimburse somebody is
+    # a property of the organisation, not of the person asking - and a
+    # submitter with two settled claims to their name would otherwise be shown
+    # the median of two, which is not an answer to "how long will I wait".
+    # One aggregate number over everybody's claims tells them nothing about
+    # anybody's claims.
+    turnaround = _turnaround(rows)
     if not everyone:
         rows = [r for r in rows if r.get("submitted_by") == actor]
 
@@ -2690,6 +2748,7 @@ def _submissions_list(token: str, body: dict[str, Any], origin: str | None) -> d
         "submissions": [_submission_view(r, budget_ccy) for r in rows[:400]],
         "budget_currency": budget_ccy,
         "can_see_everyone": everyone,
+        "turnaround": turnaround,
     }, origin)
 
 

@@ -53,8 +53,30 @@ class MyExpensesPrintsWhatWasPaid(unittest.TestCase):
 
     def test_but_the_claimed_column_is_in_the_receipt_s(self):
         # What the bill came to is a fact about the bill, and it is printed in
-        # the currency the bill printed.
-        self.assertIn("fmt(res.receiptTotal,res.currency)", self.fn)
+        # the currency the bill printed - now through `claimedCell`, which
+        # adds the converted figure beneath it.
+        self.assertIn("claimedCell(sub, res)", self.fn)
+        cell = self.app.split("function claimedCell(sub, res) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("const billed = esc(fmt(res.receiptTotal, res.currency));",
+                      cell)
+
+    def test_and_says_what_that_comes_to_here(self):
+        # Claimed was in the receipt's currency and Settled in the
+        # organisation's, so a dollar invoice put $100.00 in one column and
+        # INR 8,819.23 in the next with nothing on the row to say they were
+        # the same money.
+        cell = self.app.split("function claimedCell(sub, res) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn('<span class="inhome">', cell)
+        self.assertIn("res.receiptTotal * rate", cell)
+
+    def test_a_rupee_claim_keeps_one_line(self):
+        # A second line saying the identical thing is noise on every row of a
+        # rupee-only account.
+        cell = self.app.split("function claimedCell(sub, res) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("if (!ccy || ccy === home) return billed;", cell)
 
 
 class ThePendingListAlreadyHadThisRight(unittest.TestCase):
