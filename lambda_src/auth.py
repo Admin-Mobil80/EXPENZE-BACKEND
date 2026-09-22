@@ -2474,6 +2474,20 @@ def _claim_review(token: str, body: dict[str, Any], origin: str | None) -> dict[
     }, origin)
 
 
+def _money_or_zero(value: Any) -> Decimal:
+    """A stored figure as a number.
+
+    A total nobody could read is not a total of nil - but the alternative here
+    is refusing a payment because of a bad old row, so it is logged loudly and
+    treated as nothing paid so far.
+    """
+    try:
+        return Decimal(str(value or "0"))
+    except (ArithmeticError, ValueError):
+        logger.warning("unreadable outcome_paid %r; treating as nothing", value)
+        return Decimal(0)
+
+
 def _claim_outcome(token: str, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
     """Record a settlement or a rejection, and tell the person who claimed.
 
@@ -2565,6 +2579,35 @@ def _claim_outcome(token: str, body: dict[str, Any], origin: str | None) -> dict
         "rejected_on": time.strftime("%d %b %Y", time.gmtime(now)),
     }
 
+    # A second payment adds to the first rather than replacing it.
+    #
+    # `outcome_paid` is read everywhere as the total paid against the claim -
+    # the console builds its settlement row from it and subtracts it from what
+    # is owed - while the settlement form sends the amount being paid *now*,
+    # defaulted to whatever is outstanding. On a single payment those are the
+    # same number, which is why this went unnoticed. On a second one the first
+    # payment was simply erased: a claim paid 1,920.43 and then topped up by
+    # 75.19 would read as having been paid 75.19, with 1,920.43 owed again.
+    #
+    # Each payment is also kept as its own entry. The console carried a note
+    # saying it could show only a total rather than "a history it cannot
+    # honestly produce" - this is that history, so a part-paid claim can say
+    # what was paid, when, and against which reference.
+    paid_now = _money_or_zero(claim.get("paid"))
+    already = _money_or_zero(item.get("outcome_paid")) if kind == "settled" else Decimal(0)
+    paid_total = already + paid_now
+
+    paid_entries = list(item.get("outcome_payments") or []) if kind == "settled" else []
+    if kind == "settled":
+        paid_entries.append({
+            "amount": str(paid_now), "at": now,
+            "by": acting.get("name") or actor,
+            "mode": claim.get("mode") or "",
+            "reference": claim.get("reference") or "",
+            "source": claim.get("source") or "payout",
+            "paid_on": claim.get("paid_on") or "",
+        })
+
     # Recorded before the notice goes out: a message the employee acts on must
     # never describe a state that was never written down.
     _submissions.update_item(
@@ -2572,12 +2615,13 @@ def _claim_outcome(token: str, body: dict[str, Any], origin: str | None) -> dict
         UpdateExpression=("SET outcome = :o, outcome_reason = :r, outcome_by = :b, "
                           "outcome_at = :ts, outcome_by_name = :bn, outcome_paid = :p, "
                           "outcome_mode = :m, outcome_reference = :ref, "
-                          "outcome_source = :src, "
+                          "outcome_source = :src, outcome_payments = :pays, "
                           "outcome_paid_on = :on"),
         ExpressionAttributeValues={
             ":o": kind, ":r": reason, ":b": actor, ":ts": now,
             ":bn": acting.get("name") or actor,
-            ":p": str(claim.get("paid") or "0"),
+            ":p": str(paid_total),
+            ":pays": paid_entries,
             ":m": claim.get("mode") or "",
             ":src": claim.get("source") or "payout",
             ":ref": claim.get("reference") or "",

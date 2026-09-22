@@ -209,7 +209,10 @@ class APaidClaimStaysPaid(unittest.TestCase):
         # rebuilt.
         body = self.auth.split("def _claim_outcome(", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("outcome_paid = :p", body)
-        self.assertIn('":p": str(claim.get("paid")', body)
+        # The running total, not this payment: a second one adds to the
+        # first rather than erasing it. See `_claim_outcome`.
+        self.assertIn('":p": str(paid_total)', self.auth)
+        self.assertIn("paid_total = already + paid_now", self.auth)
 
     def test_the_console_can_read_it_back(self):
         view = self.auth.split("def _submission_view(", 1)[1].split("\ndef ", 1)[0]
@@ -335,3 +338,53 @@ class YouSeeWhatYouAreSending(unittest.TestCase):
         css = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", self.app, re.S))
         self.assertIn(".up-preview:empty ~ .btn { margin-left:auto; }", css)
         self.assertNotIn(".up-row .btn { margin-left:auto; }", css)
+
+
+class ATopUpAddsToWhatWasAlreadyPaid(unittest.TestCase):
+    """Mobil80-Exp-16 needed 75.19 more, and recording it would have erased
+    the 1,920.43 already paid.
+
+    `outcome_paid` is read everywhere as the total paid against a claim - the
+    console builds its settlement row from it and subtracts it from what is
+    owed - while the settlement form sends the amount being paid *now*,
+    defaulted to whatever is outstanding. On a single payment those are the
+    same number, which is why it went unnoticed for as long as every claim was
+    settled in one go.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "lambda_src", "auth.py"), encoding="utf-8") as h:
+            self.auth = h.read()
+        self.fn = self.auth.split("def _claim_outcome(", 1)[1].split("\ndef ", 1)[0]
+
+    def test_the_stored_figure_is_the_running_total(self):
+        self.assertIn("paid_total = already + paid_now", self.fn)
+        self.assertIn('":p": str(paid_total)', self.fn)
+
+    def test_only_a_settlement_accumulates(self):
+        # A rejection pays nothing, and adding to a previous payment on one
+        # would invent money.
+        self.assertIn('already = _money_or_zero(item.get("outcome_paid")) '
+                      'if kind == "settled" else Decimal(0)', self.fn)
+
+    def test_each_payment_is_kept_as_its_own_entry(self):
+        # The console could previously show only a total, "rather than a
+        # history it cannot honestly produce". This is that history.
+        self.assertIn('paid_entries.append({', self.fn)
+        for field in ('"amount"', '"at"', '"by"', '"mode"', '"reference"'):
+            self.assertIn(field, self.fn.split("paid_entries.append({", 1)[1]
+                          .split("})", 1)[0])
+
+    def test_the_notice_still_reports_the_transfer_not_the_total(self):
+        # "1,995.62 reimbursed" on a 75.19 transfer sends somebody to their
+        # bank looking for money that is not there.
+        self.assertIn('"paid": body.get("paid")', self.fn)
+
+    def test_an_unreadable_old_figure_does_not_block_a_payment(self):
+        import sys
+        sys.path.insert(0, os.path.join(ROOT, "lambda_src"))
+        import auth
+        from decimal import Decimal
+        self.assertEqual(Decimal(0), auth._money_or_zero("not a number"))
+        self.assertEqual(Decimal(0), auth._money_or_zero(None))
+        self.assertEqual(Decimal("1920.43"), auth._money_or_zero("1920.43"))
