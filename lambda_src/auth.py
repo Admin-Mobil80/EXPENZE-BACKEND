@@ -2558,6 +2558,116 @@ def _tell_everybody(jobs: list) -> dict[str, bool]:
     return told
 
 
+def _claim_retype_batch(token: str, body: dict[str, Any],
+                        origin: str | None) -> dict[str, Any]:
+    """Set the expense type, the cost centre, or both, on several claims.
+
+    The answer to a queue where eighteen of twenty claims were missing one of
+    them. Both are facts about what a receipt *is*, and a person working a
+    stack of a colleague's WhatsApp receipts knows the answer for all of them
+    at once - it is the same cost centre and frequently the same type. Opening
+    eighteen pages to set two dropdowns is how a queue stops getting worked,
+    and it is the reason the old approval gate had to come out.
+
+    Nothing here is a decision. It writes down what the agent could not work
+    out; the claims stay exactly where they are, and approving or rejecting
+    them is still done one at a time by somebody who has read them.
+
+    The same rules as setting one, applied to each: the type has to be one the
+    policy covers, the group one the organisation runs, and a settled claim is
+    closed to both. Checked for every claim before the first write, so a batch
+    cannot leave half the stack changed.
+    """
+    actor = _identity_from_token(token)
+    if not actor:
+        return _reply(401, {"error": "Sign in to continue."}, origin)
+    acting = identity.resolve_by_email(actor, channel=None)
+    if not acting:
+        return _reply(403, {"error": "No membership for this account."}, origin)
+    if not runs_the_org(acting):
+        return _reply(403, {
+            "error": "Only an owner, administrator or finance executive can "
+                     "change a claim's expense type."}, origin)
+
+    ids = body.get("submission_ids")
+    if not isinstance(ids, list) or not ids:
+        return _reply(400, {"error": "Say which claims are being changed."}, origin)
+    if len(ids) > BATCH_MAX_CLAIMS:
+        return _reply(400, {
+            "error": f"That is {len(ids)} claims at once. Change at most "
+                     f"{BATCH_MAX_CLAIMS} in one go."}, origin)
+
+    org = _org_of(actor) or {}
+    expense_type = str(body.get("expense_type", "")).strip()[:60]
+    group_given = "group_id" in body
+    group_id = str(body.get("group_id", "")).strip()[:60]
+
+    if not expense_type and not group_given:
+        return _reply(400, {
+            "error": "Nothing to change - pick an expense type or a group."}, origin)
+    if expense_type and expense_type not in set(
+            policy.expense_type_ids(policy.rules_for(org))):
+        return _reply(400, {
+            "error": "Choose one of the configured expense types."}, origin)
+    if group_id and group_id not in {str(g.get("id") or "")
+                                     for g in (org.get("groups") or [])}:
+        return _reply(400, {"error": "Choose one of your configured groups."}, origin)
+
+    # Read everything first. A batch that stops half way leaves a stack
+    # somebody has to go through claim by claim to find out what happened.
+    rows = []
+    for raw in ids:
+        submission_id = str(raw or "").strip()[:80]
+        item = (_submissions.get_item(Key={"submission_id": submission_id}).get("Item")
+                if submission_id else None)
+        if not item or item.get("org_id") != acting.get("org_id"):
+            return _reply(404, {"error": f"No claim found for {submission_id}."}, origin)
+        ref = str(item.get("reference") or submission_id)
+        if item.get("outcome") == "settled":
+            return _reply(409, {
+                "error": f"{ref} has already been reimbursed and cannot be "
+                         "changed."}, origin)
+        # The same split as setting one: a finance executive corrects the
+        # filing on a claim that has cleared, and a claim still under review
+        # belongs to the reviewer until they release it.
+        if not may_review(acting) and not policy.awaiting_payment(item):
+            return _reply(403, {
+                "error": f"{ref} is still under review. Its expense type is "
+                         "the reviewer's to set until they release it."}, origin)
+        rows.append((submission_id, item))
+
+    sets, values = [], {}
+    if expense_type:
+        sets.append("answered_expense_type = :t")
+        values[":t"] = expense_type
+    if group_given:
+        sets.append("group_id = :g")
+        sets.append("group_status = :gs")
+        values[":g"] = group_id
+        # A reviewer's answer closes the question in a way an inference does
+        # not: the auditor only consults the bill while it is still open.
+        values[":gs"] = "set_by_reviewer" if group_id else "unset"
+
+    for submission_id, item in rows:
+        _submissions.update_item(
+            Key={"submission_id": submission_id},
+            UpdateExpression="SET " + ", ".join(sets),
+            ExpressionAttributeValues=values,
+        )
+        _logged(acting, actor, "claim retyped", item,
+                detail=" ".join(p for p in (
+                    f"type -> {expense_type}" if expense_type else "",
+                    f"group -> {group_id or 'unset'}" if group_given else "",
+                ) if p))
+
+    logger.info("%s set %s on %d claims", actor,
+                " and ".join(p for p in ("type" if expense_type else "",
+                                         "group" if group_given else "") if p),
+                len(rows))
+    return _reply(200, {"status": "saved", "count": len(rows),
+                        "submission_ids": [r[0] for r in rows]}, origin)
+
+
 def _claim_review_batch(token: str, body: dict[str, Any],
                         origin: str | None) -> dict[str, Any]:
     """Approve several claims that were each already ready to be approved.
@@ -3907,7 +4017,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "/member/groups", "/member/transfer", "/member/reinvite", "/member",
                     "/org/budgets", "/org/rules",
                     "/claim/outcome", "/claim/settle-batch",
-                    "/claim/review-batch",
+                    "/claim/review-batch", "/claim/retype-batch",
                     "/claim/review", "/claim/retype",
                     "/credits/order", "/credits/verify",
                     "/submissions", "/people", "/credits/ledger", "/apikey", "/audit",
@@ -3932,6 +4042,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _claim_retype(tok, body, origin)
         if path.endswith("/claim/review"):
             return _claim_review(tok, body, origin)
+        if path.endswith("/claim/retype-batch"):
+            return _claim_retype_batch(tok, body, origin)
         if path.endswith("/claim/review-batch"):
             return _claim_review_batch(tok, body, origin)
         if path.endswith("/claim/settle-batch"):

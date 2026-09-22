@@ -1132,6 +1132,9 @@ class ExpensifyAIStack(Stack):
         # Approving several claims that were each already approvable. See
         # `_claim_review_batch`: a convenience, not a shortcut.
         claim_res.add_resource("review-batch").add_method("POST", auth_integration)
+        # Setting the expense type or the cost centre on several claims at
+        # once. Not a decision - see `_claim_retype_batch`.
+        claim_res.add_resource("retype-batch").add_method("POST", auth_integration)
         claim_res.add_resource("review").add_method("POST", auth_integration)
         claim_res.add_resource("answer").add_method("POST", auth_integration)
         # A reviewer saying what an expense actually is, when nothing in the

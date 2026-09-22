@@ -191,17 +191,35 @@ class TheSubmitterHearsNothingFromACorrection(unittest.TestCase):
         self.assertNotIn("corrected_by_reviewer", worker)
         self.assertNotIn("def _reaudit(", worker)
 
-    def test_those_two_fields_still_have_exactly_one_writer(self):
-        # They are how the claim is reported and paid; a second writer would
-        # be a second answer to a question only a reviewer may answer.
-        # Writes, not mentions: `_claim_review` reads `answered_expense_type`
-        # to check the claim is tagged, which is the whole point of it being
-        # written, and a test that counted readers would forbid that.
+    def test_every_writer_of_those_two_fields_applies_the_same_rules(self):
+        # They are how the claim is reported and paid, so a writer that let
+        # somebody set them on terms the others refuse would be a second
+        # answer to one question. What matters is not that there is one
+        # writer - setting a type on twelve claims at once is the same act
+        # twelve times - but that they all ask the same things.
+        #
+        # Writes, not mentions: several functions read
+        # `answered_expense_type`, which is the whole point of writing it,
+        # and a test that counted readers would forbid that.
+        writers = {}
         for field in ("answered_expense_type", "answered_currency"):
-            writers = [fn for fn in re.findall(r"def (_[a-z_]+)\(", self.auth)
-                       if f"{field} = :" in
-                       self.auth.split(f"def {fn}(", 1)[1].split("\ndef ", 1)[0]]
-            self.assertEqual(["_claim_retype"], writers, field)
+            writers[field] = [fn for fn in re.findall(r"def (_[a-z_]+)\(", self.auth)
+                              if f"{field} = :" in
+                              self.auth.split(f"def {fn}(", 1)[1].split("\ndef ", 1)[0]]
+        self.assertEqual(["_claim_retype", "_claim_retype_batch"],
+                         sorted(writers["answered_expense_type"]))
+        # The currency prices the claim, so it stays with the single form -
+        # a bulk currency change is not a thing anybody should be offered.
+        self.assertEqual(["_claim_retype"], writers["answered_currency"])
+
+        for fn in ("_claim_retype", "_claim_retype_batch"):
+            body = self.auth.split(f"def {fn}(", 1)[1].split("\ndef ", 1)[0]
+            self.assertIn("if not runs_the_org(acting):", body, fn)
+            self.assertIn("Choose one of the configured expense types.", body, fn)
+            self.assertIn('item.get("outcome") == "settled"', body, fn)
+            # And the same split between a reviewer and finance.
+            self.assertIn("not may_review(acting)", body, fn)
+            self.assertIn("policy.awaiting_payment(item)", body, fn)
 
     def test_the_decision_is_what_reaches_them(self):
         review = self.auth.split("def _claim_review(", 1)[1].split("\ndef ", 1)[0]

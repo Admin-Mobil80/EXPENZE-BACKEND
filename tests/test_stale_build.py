@@ -42,7 +42,10 @@ class TheConsoleNoticesItIsOld(unittest.TestCase):
         # about the release one refresh later than they could have.
         boot = self.app.rsplit("setInterval(paintRefreshedAt", 1)[1]
         self.assertIn("checkBuild();", boot)
-        self.assertLess(boot.index("checkBuild();"), boot.index("if (!sessionToken())"))
+        # Before the session guard, which is `requireSession()` now that
+        # signing out actually ends a session and the back button has to be
+        # asked the same question.
+        self.assertLess(boot.index("checkBuild();"), boot.index("if (requireSession())"))
 
     def test_the_data_refresh_still_asks_too(self):
         body = self.app.split("async function refreshNow(", 1)[1].split("\n}", 1)[0]
