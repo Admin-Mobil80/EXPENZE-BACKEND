@@ -439,3 +439,99 @@ class NothingIsPaidUntilItCanBeFiled(unittest.TestCase):
         self.assertIn("const unready = payBlocker(sub);", fn)
         self.assertIn("No expense type is set. Set one above", self.app)
         self.assertIn("No cost centre is set. Set a group above", self.app)
+
+
+class TheFloatIsOnlyOfferedToSomebodyWhoHoldsOne(unittest.TestCase):
+    """The batch form offered "Their float" to everybody.
+
+    The single settlement form has always shown that choice only to a person
+    who actually holds an advance - for everybody else there is no choice to
+    make, and a dropdown with one real option is furniture that can be got
+    wrong. The batch form, added later, did not follow it: four claims could
+    have been drawn down against a float that does not exist.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split("function batchForm(claims, ccy) {", 1)[1] \
+                          .split("\n}", 1)[0]
+
+    def test_it_asks_whether_they_hold_one(self):
+        self.assertIn("const holdsFloat = !!(ADVANCES.holders || []).find(", self.fn)
+
+    def test_the_option_is_not_drawn_otherwise(self):
+        self.assertIn('(holdsFloat ? `<option value="float">Their float</option>` : "")',
+                      self.fn)
+
+    def test_nor_is_the_row_it_sits_in(self):
+        self.assertIn('`<div class="sf"${holdsFloat ? "" : " hidden"}>', self.fn)
+
+    def test_a_payout_is_the_first_option_either_way(self):
+        # So the default is right for the common case without anybody
+        # choosing, and reading the select before anything reveals it cannot
+        # say "float" - which is the bug the single form documents.
+        opts = self.fn.split('<select id="bf-src">', 1)[1].split("</select>", 1)[0]
+        self.assertLess(opts.index('value="payout"'), opts.find('value="float"')
+                        if 'value="float"' in opts else len(opts))
+
+    def test_the_single_form_still_does_the_same(self):
+        # Both readers check the wrapper is visible, not just the value.
+        single = self.app.split("function settleForm(", 1)[1].split("\n}", 1)[0]
+        self.assertIn("srcWrap0 && !srcWrap0.hidden", single)
+        self.assertIn("srcWrap1 && !srcWrap1.hidden", single)
+
+
+class ElevenNoticesGoOutAtOnce(unittest.TestCase):
+    """Eleven claims took four seconds, and API Gateway cuts a request at 29.
+
+    Each notice is an SES call and a WhatsApp call, sent one after another.
+    The writes were already done by the time the notices started, so a batch
+    that outran the clock would have left every claim approved and the
+    reviewer looking at an error - the worst shape a failure can take, because
+    there is nothing on screen to say which half happened.
+    """
+
+    def setUp(self):
+        self.auth = read("lambda_src/auth.py")
+        self.fn = self.auth.split("def _tell_everybody(", 1)[1].split("\ndef ", 1)[0]
+
+    def test_they_are_sent_together(self):
+        self.assertIn("futures.ThreadPoolExecutor", self.fn)
+        self.assertIn("from concurrent import futures", self.auth)
+
+    def test_with_a_ceiling_on_how_many_at_once(self):
+        self.assertIn("max_workers=min(8, len(jobs))", self.fn)
+
+    def test_one_failed_send_does_not_fail_the_batch(self):
+        # The claim is approved either way, and `notify.record` writes what
+        # actually went out - so a message that did not arrive is visible on
+        # the claim rather than inferred from an exception nobody saw.
+        self.assertIn("except Exception:", self.fn)
+        self.assertIn("could not tell %s about %s", self.fn)
+
+    def test_the_writes_happen_before_any_of_them(self):
+        batch = self.auth.split("def _claim_review_batch(", 1)[1].split("\ndef ", 1)[0]
+        self.assertLess(batch.index("update_item"), batch.index("_tell_everybody("))
+
+
+class TheButtonIsReleasedWhenTheWorkIsDone(unittest.TestCase):
+    """It said "Approving…" through the reload that follows, which is another
+    second or two, with every row still ticked. Eleven claims read as stuck."""
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split("async function approvePicked() {", 1)[1] \
+                          .split("\n}", 1)[0]
+
+    def test_it_repaints_as_soon_as_the_server_answers(self):
+        head = self.fn.split("if (!ok) {", 1)[0]
+        self.assertIn("approving = false;", head)
+        self.assertIn("paintApproveButton();", head)
+
+    def test_and_says_what_it_is_doing_during_the_reload(self):
+        self.assertIn("approved. Refreshing", self.fn)
+
+    def test_a_network_failure_does_not_claim_nothing_was_recorded(self):
+        # The writes may well have happened; the answer just did not arrive.
+        # "Nothing was recorded" would be a guess, and the wrong one.
+        self.assertIn("it is not clear what was recorded", self.fn)

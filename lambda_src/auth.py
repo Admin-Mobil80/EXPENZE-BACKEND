@@ -37,6 +37,7 @@ import os
 import re
 import secrets
 import time
+from concurrent import futures
 from decimal import Decimal
 from typing import Any
 
@@ -2516,6 +2517,47 @@ def _unready_to_pay(item: dict[str, Any], org: dict[str, Any]) -> str:
     return ""
 
 
+def _tell_everybody(jobs: list) -> dict[str, bool]:
+    """Send one notice per claim, all at once rather than one after another.
+
+    Each notice is an SES call and a WhatsApp call, and doing eleven of them
+    in a row took four seconds of an HTTP request that API Gateway will cut
+    off at twenty-nine. The writes were already done by then, so a batch that
+    outran the clock would have left every claim approved and the reviewer
+    looking at an error - the worst shape a failure can take, because there is
+    nothing on screen to say which half happened.
+
+    They are independent: eleven messages to whoever submitted each claim,
+    none of them waiting on another. A pool turns the four seconds into about
+    one and takes the ceiling out of reach for any batch this endpoint allows.
+
+    One failed send does not fail the batch. The claim is approved either way,
+    and `notify.record` writes what actually went out - so a message that did
+    not arrive is visible on the claim rather than inferred from an exception
+    nobody saw.
+    """
+    told = {"email": False, "whatsapp": False}
+    if not jobs:
+        return told
+
+    def one(job):
+        submission_id, claimant, claim = job
+        try:
+            result = notify.send("approved", claimant, claim)
+            notify.record(_submissions, submission_id, result)
+            return result
+        except Exception:
+            logger.exception("could not tell %s about %s",
+                             claimant.get("email"), submission_id)
+            return {}
+
+    with futures.ThreadPoolExecutor(max_workers=min(8, len(jobs))) as pool:
+        for result in pool.map(one, jobs):
+            for channel in told:
+                told[channel] = told[channel] or bool(result.get(channel))
+    return told
+
+
 def _claim_review_batch(token: str, body: dict[str, Any],
                         origin: str | None) -> dict[str, Any]:
     """Approve several claims that were each already ready to be approved.
@@ -2577,7 +2619,7 @@ def _claim_review_batch(token: str, body: dict[str, Any],
         rows.append((submission_id, item))
 
     now = int(time.time())
-    approved, told = [], {"email": False, "whatsapp": False}
+    approved, jobs = [], []
     for submission_id, item in rows:
         verdict = item.get("verdict") or {}
         amount = str(item.get("approved_total")
@@ -2596,24 +2638,22 @@ def _claim_review_batch(token: str, body: dict[str, Any],
                 amount=amount, currency=str(verdict.get("currency") or ""))
         approved.append(submission_id)
 
-        # Told per claim, through the notice that already exists for one.
-        # A person whose nineteen receipts were approved together is hearing
-        # about nineteen decisions, not one payment - the money has not moved
-        # yet, and each claim will be paid on its own terms.
+        # Told per claim, through the notice that already exists for one. A
+        # person whose eleven receipts were approved together is hearing about
+        # eleven decisions, not one payment - the money has not moved yet, and
+        # each claim will be paid on its own terms.
         claimant = identity.resolve_by_email(str(item.get("submitted_by", "")),
                                              channel=None)
         if claimant:
-            result = notify.send("approved", claimant, {
+            jobs.append((submission_id, claimant, {
                 "vendor": str((item.get("receipt") or {}).get("vendor") or "your claim"),
                 "currency": str(verdict.get("currency") or ""),
                 "approved": amount, "claim_ref": str(item.get("reference") or ""),
                 "settled_by": acting.get("name") or actor,
                 "approved_by": acting.get("name") or actor,
-            })
-            notify.record(_submissions, submission_id, result)
-            for channel in told:
-                told[channel] = told[channel] or bool(result.get(channel))
+            }))
 
+    told = _tell_everybody(jobs)
     logger.info("%s approved %d claims in one go", actor, len(approved))
     return _reply(200, {"status": "approved", "approved": approved,
                         "count": len(approved), "sent": told}, origin)
