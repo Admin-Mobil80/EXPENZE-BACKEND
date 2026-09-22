@@ -192,9 +192,34 @@ class PrintingAWholeRun(unittest.TestCase):
             "\n  }", 1)[0]
         self.assertIn("printAll.hidden = !awaiting.length || !can.seeQueue();", block)
 
-    def test_progress_is_reported_while_it_works(self):
+    def test_progress_is_reported_on_the_button_that_started_it(self):
         # Twenty-two PDFs is long enough that a silent button reads as broken.
-        self.assertIn("Preparing ${++done} of ${subs.length}", self.fn)
+        #
+        # Not through `payMsg`. That is the settlement confirmation line and it
+        # persists on purpose - "INR 6,632.00 recorded as paid" is worth
+        # leaving up. A progress message is the opposite: true for four seconds
+        # and misleading after. "14 bills ready." sat over a list that had
+        # since become ten claims and read as a statement about the list.
+        self.assertIn("printProgress = subs.length > 1 ? `${++done} of ${subs.length}`",
+                      self.fn)
+        self.assertIn("`Preparing${printProgress ? \" \" + printProgress : \"\"}",
+                      console())
+
+    def test_and_it_cannot_outlive_the_job(self):
+        tail = self.fn.split("} finally {", 1)[1]
+        self.assertIn('printProgress = "";', tail)
+
+    def test_nothing_is_left_behind_saying_it_finished(self):
+        # The print dialog opening is the confirmation. A sentence after it is
+        # about a job that has ended.
+        self.assertNotIn("bills ready", self.fn)
+        self.assertIn("window.print();", self.fn)
+
+    def test_only_failures_are_left_on_screen(self):
+        # Those are worth persisting: the reader needs to know it did not
+        # happen, and why.
+        for call in re.findall(r"say\(([^;]+)\);", self.fn, re.S):
+            self.assertIn("false", call, call[:60])
 
     def test_one_unreadable_receipt_does_not_cost_the_others(self):
         self.assertIn("catch (err) {", self.fn)
