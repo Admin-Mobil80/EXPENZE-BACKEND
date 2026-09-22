@@ -3,7 +3,7 @@
 Mobil80-Exp-16 is a $20.00 Cursor invoice. Printed on it, under Payment
 history: "Charged 1,995.62 INR using 1 USD = 99.7812 INR (includes 4%
 conversion fee)". It was reimbursed at the market rate for that day, 96.0216,
-which came to 1,920.43 - leaving Rehaan 75.19 short on a bill that stated in
+which came to 1,920.43 - leaving Manoj 75.19 short on a bill that stated in
 print exactly what he had paid.
 
 No looked-up rate reproduces 99.7812, because no public rate includes somebody
@@ -17,13 +17,17 @@ the sense a table means. It is the transaction.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import unittest
 from decimal import Decimal
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.join(ROOT, "lambda_src"))
-os.environ.setdefault("AWS_DEFAULT_REGION", "ap-southeast-1")
+for _k, _v in (("AWS_DEFAULT_REGION", "ap-southeast-1"),
+               ("EXPENSES_TABLE", "e"), ("ORGS_TABLE", "o"),
+               ("INTAKE_TABLE", "t"), ("USERS_TABLE", "u")):
+    os.environ.setdefault(_k, _v)
 
 import fx  # noqa: E402
 
@@ -131,10 +135,43 @@ class TheModelIsAskedForIt(unittest.TestCase):
         for field in ("charged_total", "charged_currency", "charged_rate"):
             self.assertIn(field, required)
 
-    def test_they_are_carried_through_to_the_receipt(self):
-        self.assertIn('charged_total=args.get("charged_total")', self.handler)
-        self.assertIn('charged_currency=args.get("charged_currency")', self.handler)
-        self.assertIn('charged_rate=args.get("charged_rate")', self.handler)
+    def test_they_reach_the_payout_and_not_the_policy_engine(self):
+        """The test that used to live here asserted the bug.
+
+        It pinned `charged_total=args.get("charged_total")` as a literal, and
+        that line was a keyword argument to `evaluate_policy`, which does not
+        take one. Every audit raised TypeError, three times, and parked the
+        receipt at needs_human - Mobil80-Exp-63, a handwritten bill for 190.00,
+        is the one that hit it. The suite stayed green throughout, because the
+        assertion was that the broken line was present.
+
+        A string being in a file says nothing about whether it runs. So this
+        calls the function instead, with the shape that crashed.
+        """
+        import handler, policy
+        args = {"line_items": [{"description": "Laptop parts", "amount": "190.00"}],
+                "expense_type": "meals", "stated_total": "190.00",
+                "charged_total": "1995.62", "charged_currency": "INR",
+                "charged_rate": "99.7812"}
+        verdict = handler._run_policy(args, "INR", policy.DEFAULT_RULES)
+        self.assertEqual("190.00", verdict["receipt_total"])
+
+        # The conversion belongs to the payout, which is handed the receipt.
+        self.assertIn('fx.for_payout(verdict, org_default, receipt)', self.handler)
+        run = self.handler.split("def _run_policy(", 1)[1].split("\ndef ", 1)[0]
+        for field in ("charged_total=", "charged_currency=", "charged_rate="):
+            self.assertNotIn(field, run)
+
+    def test_the_engine_signature_is_the_one_being_called(self):
+        # The class of mistake, checked as a class: every keyword `_run_policy`
+        # passes has to be one `evaluate_policy` accepts.
+        import inspect, policy, handler
+        accepted = set(inspect.signature(policy.evaluate_policy).parameters)
+        run = self.handler.split("def _run_policy(", 1)[1].split("\ndef ", 1)[0]
+        body = run.split("policy.evaluate_policy(", 1)[1]
+        passed = set(re.findall(r"^\s*(\w+)=", body, re.M))
+        self.assertEqual(set(), passed - accepted,
+                         "passing a keyword the policy engine does not take")
 
     def test_the_model_is_told_not_to_invent_one(self):
         # The single thing this field is for is being the figure nobody had to

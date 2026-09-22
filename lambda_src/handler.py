@@ -492,9 +492,14 @@ def _run_policy(args: dict[str, Any], currency: str,
         # lines; where the receipt prints its own total and the two disagree,
         # somebody has to look.
         stated_total=args.get("stated_total"),
-        charged_total=args.get("charged_total"),
-        charged_currency=args.get("charged_currency"),
-        charged_rate=args.get("charged_rate"),
+        # And nothing about what the card was charged. That belongs to the
+        # payout, not to the policy: the engine decides what the claim is worth
+        # in the currency the bill is written in, and the conversion happens
+        # afterwards in `fx.for_payout`, which is handed the whole receipt.
+        #
+        # They were passed here, briefly, and `evaluate_policy` does not take
+        # them - so every audit raised TypeError, three times, and parked the
+        # receipt at needs_human. Mobil80-Exp-63 is the one that hit it.
     )
 
 
