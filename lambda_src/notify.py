@@ -365,6 +365,73 @@ def outcome_notice(claim: dict[str, Any]) -> dict[str, str]:
     return {"subject": f"{vendor} {total} — {state}",
             "text": text, "whatsapp": text}
 
+def settled_batch_notice(claim: dict[str, Any]) -> dict[str, str]:
+    """One payment covering several claims, said once.
+
+    The alternative was four messages for one transfer, each naming a fraction
+    of it. Somebody owed 25,176.50 got told four times, in four amounts, none
+    of which was the figure on their statement - and the natural reading of
+    four separate reimbursement notices is four separate payments coming.
+
+    So the total leads, because that is what will appear on the statement, and
+    the claims it covers are listed under it, because that is what somebody
+    checks it against.
+    """
+    ccy = str(claim.get("currency") or "")
+    paid = money(claim.get("paid"), ccy)
+    refs = [str(r) for r in (claim.get("claim_refs") or []) if r]
+    n = len(refs)
+    from_float = str(claim.get("source") or "") == "float"
+
+    if from_float:
+        subject = f"{paid} set against your float — {n} claims"
+        lines = [
+            f"{n} of your expense claims have been set against the cash "
+            "advance you hold.",
+            "",
+            "No payment has been made to you - you spent this from the float, "
+            "and your advance has been reduced by it.",
+            "",
+            f"Set against:  {paid}",
+        ]
+    else:
+        subject = f"{paid} reimbursed — {n} claims"
+        lines = [
+            f"{n} of your expense claims have been reimbursed together, in one "
+            "payment.",
+            "",
+            f"Paid:        {paid}",
+        ]
+
+    # Named rather than counted. "4 claims" is not something anybody can check;
+    # the references are what they have written down.
+    lines += ["", f"Covering {n} claim{'' if n == 1 else 's'}:"]
+    lines += [f"  {ref}" for ref in refs]
+    lines.append("")
+
+    fields = ((("Accounted on:", "paid_on"),) if from_float
+              else (("Mode:", "mode"), ("Bank reference:", "reference"),
+                    ("Paid on:", "paid_on")))
+    for label, key in fields + (("Settled by:", "settled_by"),):
+        value = str(claim.get(key) or "").strip()
+        if value:
+            lines.append(f"{label:<12} {value}")
+    note = str(claim.get("note") or "").strip()
+    if note:
+        lines += ["", f"Note: {note}"]
+    lines += ["", "Reply to your finance team if anything here does not match "
+                  "your records.", "", "Expenze - expenze.ai"]
+
+    short = ((f"{paid} for {n} claims has been set against your cash advance - "
+              "no payment is coming to you, your float is reduced by it."
+              if from_float
+              else f"{paid} has been reimbursed, covering {n} claims: "
+                   + ", ".join(refs) + ".")
+             + (f" Reference: {claim['reference']}." if claim.get("reference")
+                and not from_float else ""))
+    return {"subject": subject, "text": "\n".join(lines), "whatsapp": short}
+
+
 def low_credits_notice(claim: dict[str, Any]) -> dict[str, str]:
     """Tell the people who can top up, before it stops mattering that they can.
 
@@ -474,7 +541,8 @@ def _total_of(claims: list[dict[str, Any]]) -> str:
 # what the agent cannot settle goes to a reviewer, and what a reviewer cannot
 # settle they decide. A claimant hears twice - when it is cleared, and when it
 # is paid or refused.
-NOTICES = {"settled": settled_notice, "rejected": rejected_notice,
+NOTICES = {"settled": settled_notice, "settled_batch": settled_batch_notice,
+           "rejected": rejected_notice,
            "outcome": outcome_notice, "approved": approved_notice,
            "low_credits": low_credits_notice, "disputed": disputed_notice}
 
@@ -616,7 +684,8 @@ def _send_whatsapp(to: str, kind: str, claim: dict[str, Any],
         logger.exception("could not WhatsApp the %s notice", kind)
         return False
 
-def send(kind: str, member: dict[str, Any], claim: dict[str, Any]) -> dict[str, Any]:
+def send(kind: str, member: dict[str, Any], claim: dict[str, Any],
+         only: str = "") -> dict[str, Any]:
     """Tell one person what happened to one claim.
 
     Delivery on either channel can fail without the other being affected, and
@@ -632,14 +701,25 @@ def send(kind: str, member: dict[str, Any], claim: dict[str, Any]) -> dict[str, 
     email = str(member.get("email") or "").strip().lower()
     sent = {"email": False, "whatsapp": False}
     message_id = ""
-    if email:
+    # `only` splits a batch across the two channels.
+    #
+    # One payment covering four claims is one thing to say by email - the
+    # total, and the claims it covers - and four things to say on WhatsApp,
+    # because every WhatsApp notice goes out as an approved template shaped
+    # for one claim, naming one vendor. There is no template for a payment
+    # covering several, and bending one of the others into the job would send
+    # a message with a total in the field meant for a single bill.
+    #
+    # So the batch sends its email once and lets each claim send its own
+    # WhatsApp through the template that fits it.
+    if email and only in ("", "email"):
         message_id = _send_email(email, notice["subject"], notice["text"])
         sent["email"] = bool(message_id)
 
     # Only a number its owner verified. One somebody else typed in proves
     # nothing, and a claim outcome names an amount and a vendor.
     mobile = str(member.get("mobile") or "").strip()
-    if mobile and member.get("whatsapp_channel") == "active":
+    if mobile and member.get("whatsapp_channel") == "active" and only in ("", "whatsapp"):
         sent["whatsapp"] = _send_whatsapp(mobile, kind, claim, notice)
 
     logger.info("%s notice: email=%s whatsapp=%s", kind, sent["email"], sent["whatsapp"])

@@ -2077,6 +2077,10 @@ REVIEW_ACTIONS = ("approved", "rejected", "reopened", "disputed")
 # The ones that decide whether somebody is paid. `disputed` is not among them:
 # it hands the claim to a reviewer rather than deciding it, which is why a
 # finance executive may do it and may not do these. See `may_review`.
+# One transfer covering more than this is not a consolidated payment, it is
+# a payment run - and a run nobody can read back off one statement line.
+BATCH_MAX_CLAIMS = 40
+
 DECIDING_ACTIONS = ("approved", "rejected", "reopened")
 
 # And the one a person makes about their own. Separate because the
@@ -2486,6 +2490,167 @@ def _money_or_zero(value: Any) -> Decimal:
     except (ArithmeticError, ValueError):
         logger.warning("unreadable outcome_paid %r; treating as nothing", value)
         return Decimal(0)
+
+
+def _claim_settle_batch(token: str, body: dict[str, Any],
+                        origin: str | None) -> dict[str, Any]:
+    """One transfer, several claims, one message about it.
+
+    Finance pays a person, not a claim. Somebody with four receipts waiting is
+    owed one amount and gets one bank transfer, and settling that four times
+    over produced four records each claiming to be the payment, four rows in
+    the audit log against one UTR, and four messages telling somebody their
+    claim had been reimbursed - so a person owed 25,176.50 once was told about
+    it four times, in four amounts, none of which was the figure on their
+    statement.
+
+    What is recorded is still per claim, because that is what a claim is: each
+    row keeps its own share, and they share the reference that ties all of them
+    to the one line on the bank statement. What changes is that the person
+    hears once, and the total they are told is the total that moved.
+
+    Everything is checked before anything is written. A batch that fails half
+    way is worse than one that fails at the start: the money has gone, and the
+    record of it is now partial in a way nobody can see from the outside.
+    """
+    actor = _identity_from_token(token)
+    if not actor:
+        return _reply(401, {"error": "Sign in to continue."}, origin)
+    acting = identity.resolve_by_email(actor, channel=None)
+    if not acting or not runs_the_org(acting):
+        return _reply(403, {
+            "error": "Only an owner, administrator or finance executive can "
+                     "settle a claim."}, origin)
+
+    lines = body.get("claims")
+    if not isinstance(lines, list) or not lines:
+        return _reply(400, {"error": "Say which claims this payment covers."}, origin)
+    if len(lines) > BATCH_MAX_CLAIMS:
+        return _reply(400, {
+            "error": f"That is {len(lines)} claims in one payment. Settle at "
+                     f"most {BATCH_MAX_CLAIMS} at a time."}, origin)
+
+    source = "float" if str(body.get("source", "")) == "float" else "payout"
+    reference = str(body.get("reference", "")).strip()[:80]
+    # Same rule as a single settlement, and for the same reason: it is what
+    # ties this payment to the line on the statement. A batch needs it more,
+    # not less - it is the only thing connecting several claims to one debit.
+    if source != "float" and not reference:
+        return _reply(400, {
+            "error": "Give the transaction reference - the UTR, cheque number "
+                     "or transaction id. It is what ties these claims to the "
+                     "one line on the bank statement."}, origin)
+
+    # Read every claim first, and refuse the whole batch on anything wrong.
+    rows, total, claimant_email = [], Decimal(0), ""
+    for line in lines:
+        if not isinstance(line, dict):
+            return _reply(400, {"error": "Each claim needs an id and an amount."}, origin)
+        submission_id = str(line.get("submission_id", "")).strip()[:80]
+        item = (_submissions.get_item(Key={"submission_id": submission_id}).get("Item")
+                if submission_id else None)
+        if not item or item.get("org_id") != acting.get("org_id"):
+            return _reply(404, {"error": f"No claim found for {submission_id}."}, origin)
+
+        amount = _money_or_zero(line.get("amount"))
+        if amount <= 0:
+            return _reply(400, {
+                "error": f"{item.get('reference') or submission_id} has no amount "
+                         "to pay."}, origin)
+
+        # One payment goes to one person. Splitting a transfer across two
+        # payees is not a consolidated payment, it is two payments.
+        who = str(item.get("submitted_by", "")).lower()
+        if claimant_email and who != claimant_email:
+            return _reply(400, {
+                "error": "These claims belong to different people. One payment "
+                         "covers one person's claims."}, origin)
+        claimant_email = claimant_email or who
+
+        rows.append((submission_id, item, amount))
+        total += amount
+
+    claimant = identity.resolve_by_email(claimant_email, channel=None)
+    if not claimant:
+        return _reply(409, {"error": "That claim has no active claimant to notify."},
+                      origin)
+
+    # The figure the console showed the person pressing the button has to be
+    # the figure that gets written down. If they disagree, something moved
+    # between the two - another settlement, a re-approval - and the safe answer
+    # is to stop and let them look again.
+    stated = _money_or_zero(body.get("paid"))
+    if stated and stated != total:
+        return _reply(409, {
+            "error": f"The claims add up to {total}, not {stated}. Something "
+                     "changed while this was open - reload and try again."}, origin)
+
+    now = int(time.time())
+    paid_on = str(body.get("paid_on", ""))[:24]
+    mode = str(body.get("mode", ""))[:40]
+    note = str(body.get("note", ""))[:400]
+    refs, settled = [], []
+
+    for submission_id, item, amount in rows:
+        already = _money_or_zero(item.get("outcome_paid")) \
+            if str(item.get("outcome") or "") == "settled" else Decimal(0)
+        entries = list(item.get("outcome_payments") or []) \
+            if str(item.get("outcome") or "") == "settled" else []
+        entries.append({
+            "amount": str(amount), "at": now,
+            "by": acting.get("name") or actor, "mode": mode,
+            "reference": reference, "source": source, "paid_on": paid_on,
+        })
+        _submissions.update_item(
+            Key={"submission_id": submission_id},
+            UpdateExpression=("SET outcome = :o, outcome_reason = :r, outcome_by = :b, "
+                              "outcome_at = :ts, outcome_by_name = :bn, outcome_paid = :p, "
+                              "outcome_mode = :m, outcome_reference = :ref, "
+                              "outcome_source = :src, outcome_payments = :pays, "
+                              "outcome_paid_on = :on"),
+            ExpressionAttributeValues={
+                ":o": "settled", ":r": "", ":b": actor, ":ts": now,
+                ":bn": acting.get("name") or actor,
+                ":p": str(already + amount), ":pays": entries,
+                ":m": mode, ":src": source, ":ref": reference, ":on": paid_on,
+            },
+        )
+        # One row per claim, because that is what was settled - and every one
+        # of them carries the reference, so the four rows and the one debit can
+        # be tied together afterwards.
+        _logged(acting, actor, "claim settled", item,
+                amount=str(amount), currency=str(body.get("currency", ""))[:3].upper(),
+                detail=" ".join(p for p in (mode, reference) if p))
+        refs.append(str(item.get("reference") or submission_id))
+        settled.append(submission_id)
+
+    claim = {
+        "currency": str(body.get("currency", ""))[:3].upper(),
+        "paid": str(total), "count": len(refs), "claim_refs": refs,
+        "mode": mode, "reference": reference, "source": source,
+        "paid_on": paid_on, "note": note,
+        "settled_by": acting.get("name") or actor,
+    }
+    # The email says it once, with the total and every claim it covers.
+    result = notify.send("settled_batch", claimant, claim, only="email")
+
+    # WhatsApp says it per claim, through the template that fits one claim -
+    # which is the only shape an approved template comes in. Four messages for
+    # one transfer is more than the email needs to be, and it is what the
+    # channel can actually carry.
+    for submission_id, item, amount in rows:
+        one = notify.send("settled", claimant, {
+            **claim, "paid": str(amount), "approved": str(amount),
+            "vendor": str((item.get("receipt") or {}).get("vendor") or "your claim"),
+            "claim_ref": str(item.get("reference") or ""),
+        }, only="whatsapp")
+        result["whatsapp"] = result.get("whatsapp") or one.get("whatsapp")
+        notify.record(_submissions, submission_id, one)
+    notify.record(_submissions, settled[0], result)
+    logger.info("%s settled %d claims for %s as one payment of %s",
+                actor, len(settled), claimant_email, total)
+    return _reply(200, {"status": "settled", "settled": settled,
+                        "paid": str(total), **result}, origin)
 
 
 def _claim_outcome(token: str, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
@@ -3541,7 +3706,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                    ("/whatsapp/add", "/whatsapp/verify", "/me", "/org", "/org/groups",
                     "/member/groups", "/member/transfer", "/member/reinvite", "/member",
                     "/org/budgets", "/org/rules",
-                    "/claim/outcome",
+                    "/claim/outcome", "/claim/settle-batch",
                     "/claim/review", "/claim/retype",
                     "/credits/order", "/credits/verify",
                     "/submissions", "/people", "/credits/ledger", "/apikey", "/audit",
@@ -3566,6 +3731,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _claim_retype(tok, body, origin)
         if path.endswith("/claim/review"):
             return _claim_review(tok, body, origin)
+        if path.endswith("/claim/settle-batch"):
+            return _claim_settle_batch(tok, body, origin)
         if path.endswith("/claim/outcome"):
             return _claim_outcome(tok, body, origin)
         if path.endswith("/apikey"):

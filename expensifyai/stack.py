@@ -1125,6 +1125,10 @@ class ExpensifyAIStack(Stack):
         # A rejection carries a reason or it is refused - see notify.py.
         claim_res = auth.add_resource("claim")
         claim_res.add_resource("outcome").add_method("POST", auth_integration)
+        # One transfer covering several of one person's claims. See
+        # `_claim_settle_batch`: the record stays per claim, the payment does
+        # not, and the submitter hears about it once.
+        claim_res.add_resource("settle-batch").add_method("POST", auth_integration)
         claim_res.add_resource("review").add_method("POST", auth_integration)
         claim_res.add_resource("answer").add_method("POST", auth_integration)
         # A reviewer saying what an expense actually is, when nothing in the
