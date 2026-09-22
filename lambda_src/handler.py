@@ -202,6 +202,43 @@ RECEIPT_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "Grand total as printed, decimal string. Empty string if absent.",
         },
+        # What the card was actually charged, when the bill says so.
+        #
+        # A foreign invoice settled by an Indian card often prints both halves:
+        # "$20.00" as the price and "Charged 1,995.62 INR using 1 USD =
+        # 99.7812 INR (includes 4% conversion fee)" as what left the account.
+        # The second is not an estimate of the first - it is the transaction,
+        # fee and all, and it is what the employee is out of pocket by. No rate
+        # we can look up reproduces it, because no public rate includes their
+        # card issuer's margin.
+        "charged_total": {
+            "type": "string",
+            "description": (
+                "What the payer was actually charged in another currency, as "
+                "printed - decimal string. ONLY when the receipt itself states "
+                "it: a card settlement line, a 'charged in' line, a converted "
+                "total beside the original. Empty string when the bill shows "
+                "one currency only, which is the normal case. Never compute "
+                "this from a rate you know."
+            ),
+        },
+        "charged_currency": {
+            "type": ["string", "null"],
+            "description": (
+                "ISO-4217 code of `charged_total`, taken from the same line. "
+                "Null when there is no such line."
+            ),
+        },
+        "charged_rate": {
+            "type": "string",
+            "description": (
+                "The conversion rate that line prints, as units of "
+                "`charged_currency` per one unit of `currency` - '99.7812' for "
+                "'1 USD = 99.7812 INR'. Empty string when the bill states a "
+                "charged amount but no rate; empty when there is no such line. "
+                "Copy it, do not derive it."
+            ),
+        },
         # Two registrations on one bill, and telling them apart is the whole
         # job: one identifies the shop, the other identifies who is being
         # billed - and only the second says which of our cost centres this
@@ -309,6 +346,9 @@ RECEIPT_SCHEMA: dict[str, Any] = {
         "currency_source",
         "currency_evidence",
         "stated_total",
+        "charged_total",
+        "charged_currency",
+        "charged_rate",
         "invoice_number",
         "vendor_tax_id",
         "buyer_tax_id",
@@ -351,6 +391,18 @@ EXTRACTION_SYSTEM = (
     "from the language, the cuisine, the vendor's name or the size of the "
     "numbers - a fallback is applied downstream from the organisation's own "
     "settings, and it can only work if you report the absence honestly.\n\n"
+
+    "CHARGED IN ANOTHER CURRENCY. Some bills print both the price and what "
+    "the payer's card was actually charged - '$20.00' with 'Charged 1,995.62 "
+    "INR using 1 USD = 99.7812 INR (includes 4% conversion fee)'. When that "
+    "line is there, copy all three parts into charged_total, charged_currency "
+    "and charged_rate exactly as printed. It is the transaction itself, "
+    "including whatever margin the card issuer took, and it is what the person "
+    "is out of pocket by - no rate looked up afterwards reproduces it. When "
+    "the bill shows one currency only, which is the normal case, leave all "
+    "three empty and null. Never compute a charged amount from a rate you "
+    "know: an invented conversion is worse than none, because the one thing "
+    "this field is for is being the figure nobody had to guess.\n\n"
 
     "CLASSIFICATION. Decide what the receipt IS before what is on it: a "
     "supermarket bill of provisions for an office canteen is canteen_groceries, "
@@ -440,6 +492,9 @@ def _run_policy(args: dict[str, Any], currency: str,
         # lines; where the receipt prints its own total and the two disagree,
         # somebody has to look.
         stated_total=args.get("stated_total"),
+        charged_total=args.get("charged_total"),
+        charged_currency=args.get("charged_currency"),
+        charged_rate=args.get("charged_rate"),
     )
 
 
@@ -574,7 +629,9 @@ def audit(receipt_input: dict[str, Any], org_id: str = "",
         # were in, so the conversion happens once here - at the rate of the day
         # the claim was decided - rather than being worked out again by
         # whoever is doing the payment run.
-        "payout": fx.for_payout(verdict, org_default),
+        # The receipt goes in too: when the bill prints what the card was
+        # actually charged, that beats any rate we could look up. See fx.py.
+        "payout": fx.for_payout(verdict, org_default, receipt),
     }
 
 

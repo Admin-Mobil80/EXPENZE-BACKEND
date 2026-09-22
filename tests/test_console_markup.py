@@ -3607,7 +3607,10 @@ class AForeignReceiptIsPaidInTheHomeCurrency(unittest.TestCase):
         self.assertIn('convert(verdict.get("receipt_total"), frm, to)', budget)
 
     def test_the_rate_is_stamped_on_the_claim(self):
-        self.assertIn('"payout": fx.for_payout(verdict, org_default)', self.handler)
+        # The receipt goes in too, so a bill that printed its own conversion
+        # can override the looked-up one. See fx.printed_rate.
+        self.assertIn('"payout": fx.for_payout(verdict, org_default, receipt)',
+                      self.handler)
         self.assertIn("payout_value = :pv", self.worker)
         self.assertIn('":pv": json.loads(json.dumps(outcome.get("payout") or {}),',
                       self.worker)

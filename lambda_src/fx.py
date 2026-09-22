@@ -72,6 +72,8 @@ TIMEOUT = 6
 
 # Per-container memo on top of the table, so one invocation reading forty
 # claims does one DynamoDB read rather than forty.
+TWO_PLACES = Decimal("0.01")
+
 _memo: Optional[dict[str, Any]] = None
 
 
@@ -230,7 +232,8 @@ def for_budget(verdict: dict[str, Any], budget_currency: str) -> dict[str, Any]:
     return converted or {}
 
 
-def for_payout(verdict: dict[str, Any], base_currency: str) -> dict[str, Any]:
+def for_payout(verdict: dict[str, Any], base_currency: str,
+               receipt: Any = None) -> dict[str, Any]:
     """The rate this claim pays out at, and what that is on today's figures.
 
     **The rate is the part that matters.** What is owed on a claim is not
@@ -256,5 +259,85 @@ def for_payout(verdict: dict[str, Any], base_currency: str) -> dict[str, Any]:
     to = str(base_currency or "")
     if not frm or not to or frm.upper() == to.upper():
         return {}
+
+    # The bill's own conversion wins, where it made one.
+    printed = printed_rate(receipt, frm, to)
+    if printed is not None:
+        amount = _decimal(verdict.get("reimbursable_total"))
+        return {
+            "amount": ("" if amount is None
+                       else str((amount * printed).quantize(TWO_PLACES))),
+            "currency": to.upper(),
+            "rate": str(printed.quantize(Decimal("0.00000001"))),
+            "as_of": "as printed on the bill",
+            "from": frm.upper(),
+            # So the console can say where the figure came from, and so a
+            # reader who knows today's rate is not left thinking we got it
+            # wrong by four per cent.
+            "source": "receipt",
+        }
+
     converted = convert(verdict.get("reimbursable_total"), frm, to)
+    if converted:
+        converted["source"] = "market"
     return converted or {}
+
+
+def printed_rate(receipt: Any, frm: str, to: str) -> Optional[Decimal]:
+    """The rate this bill printed for itself, or None if it printed none.
+
+    Taken in preference to any rate we can look up, and the reason is not that
+    it is fresher. It is that it is not a rate at all in the sense a table
+    means: it is the transaction. A foreign invoice settled by an Indian card
+    prints "$20.00" as the price and "Charged 1,995.62 INR using 1 USD =
+    99.7812 INR (includes 4% conversion fee)" as what actually left the
+    account, issuer's margin and all. Mobil80-Exp-16 was reimbursed at the
+    market rate, 96.0216, for 1,920.43 - leaving the employee 75.19 short on a
+    bill that said in print exactly what he had paid.
+
+    No public rate reproduces that number, because no public rate includes
+    somebody's card issuer's margin. Reimbursing at one means quietly making
+    the employee carry the fee for spending the company's money.
+
+    The printed rate is preferred over dividing the charge by the total: it is
+    the figure the bank quoted, at full precision, and the division inherits
+    the rounding of both amounts. The division is the fallback for a bill that
+    states the charge and not the rate, which is common.
+
+    A printed rate of zero is a misread rather than a discount, so it falls
+    through to the division like a missing one. None only when the bill did not
+    do this at all, when what it did does not match the pair being converted,
+    or when neither the rate nor the two amounts can be made sense of.
+    """
+    if not isinstance(receipt, dict):
+        return None
+    if str(receipt.get("charged_currency") or "").strip().upper() != str(to or "").upper():
+        return None
+    # And the price it converted has to be the currency we are converting from,
+    # or this is two unrelated numbers being divided by each other.
+    if str(receipt.get("currency") or "").strip().upper() != str(frm or "").upper():
+        return None
+
+    rate = _decimal(receipt.get("charged_rate"))
+    if rate is None or rate <= 0:
+        charged = _decimal(receipt.get("charged_total"))
+        total = _decimal(receipt.get("stated_total"))
+        if charged is None or total is None or total <= 0 or charged <= 0:
+            return None
+        rate = charged / total
+    return rate if rate > 0 else None
+
+
+def _decimal(value: Any) -> Optional[Decimal]:
+    """A printed figure as a number, or None. Never an exception, never a zero
+    standing in for one - a total nobody could read is not a total of nil."""
+    try:
+        text = str(value if value is not None else "").strip().replace(",", "")
+    except (TypeError, ValueError):
+        return None
+    if not text:
+        return None
+    try:
+        return Decimal(text)
+    except (ArithmeticError, ValueError):
+        return None
