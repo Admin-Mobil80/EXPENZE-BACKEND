@@ -535,3 +535,154 @@ class TheButtonIsReleasedWhenTheWorkIsDone(unittest.TestCase):
         # The writes may well have happened; the answer just did not arrive.
         # "Nothing was recorded" would be a guess, and the wrong one.
         self.assertIn("it is not clear what was recorded", self.fn)
+
+
+class SettingAFieldOnAStackAtOnce(unittest.TestCase):
+    """Eighteen of twenty claims were missing an expense type or a group.
+
+    Both are facts about what a receipt *is*, and somebody working a stack of
+    a colleague's WhatsApp receipts knows the answer for all of them at once -
+    the same cost centre, frequently the same type. Opening eighteen pages to
+    set two dropdowns is how a queue stops getting worked, and it is the
+    reason the approval gate had to come out.
+
+    Nothing here is a decision. It writes down what the agent could not work
+    out; the claims stay exactly where they are, and approving or rejecting
+    them is still done one at a time by somebody who has read them.
+    """
+
+    def setUp(self):
+        TheEndpointRefusesBeforeItWrites.setUp(self)
+        # A reviewer, not a finance executive: these claims are in the review
+        # queue, which is where this control lives. The finance case gets its
+        # own test below.
+        auth.identity.resolve_by_email = lambda e, channel=None: {
+            "email": e, "org_id": "org1", "role": "admin", "name": "Rana"}
+        self.good = {"submission_ids": ["a", "b"], "expense_type": "meals"}
+
+    def tearDown(self):
+        TheEndpointRefusesBeforeItWrites.tearDown(self)
+
+    def call(self, body):
+        reply = auth._claim_retype_batch("tok", body, None)
+        return reply["statusCode"], json.loads(reply["body"])
+
+    def test_it_sets_the_type_on_every_claim(self):
+        code, out = self.call(self.good)
+        self.assertEqual(200, code)
+        self.assertEqual(2, out["count"])
+        for write in self.table.writes:
+            self.assertEqual("meals",
+                             write["ExpressionAttributeValues"][":t"])
+
+    def test_it_sets_the_group_and_closes_the_question(self):
+        # "set_by_reviewer" stops the auditor consulting the bill again: a
+        # person's answer is final in a way an inference is not.
+        code, _ = self.call({"submission_ids": ["a"], "group_id": "mobil80"})
+        self.assertEqual(200, code)
+        values = self.table.writes[0]["ExpressionAttributeValues"]
+        self.assertEqual("mobil80", values[":g"])
+        self.assertEqual("set_by_reviewer", values[":gs"])
+
+    def test_clearing_a_group_is_a_change_and_not_a_no_op(self):
+        # A reviewer removing a tag the agent got wrong is an answer.
+        code, _ = self.call({"submission_ids": ["a"], "group_id": ""})
+        self.assertEqual(200, code)
+        self.assertEqual("unset",
+                         self.table.writes[0]["ExpressionAttributeValues"][":gs"])
+
+    def test_an_invented_type_is_refused(self):
+        code, out = self.call({**self.good, "expense_type": "made_up"})
+        self.assertEqual(400, code)
+        self.assertIn("configured expense types", out["error"])
+        self.assertEqual([], self.table.writes)
+
+    def test_an_invented_group_is_refused(self):
+        code, out = self.call({"submission_ids": ["a"], "group_id": "nope"})
+        self.assertEqual(400, code)
+        self.assertIn("configured groups", out["error"])
+        self.assertEqual([], self.table.writes)
+
+    def test_asking_for_nothing_is_refused(self):
+        code, out = self.call({"submission_ids": ["a"]})
+        self.assertEqual(400, code)
+        self.assertIn("pick an expense type or a group", out["error"])
+
+    def test_a_settled_claim_is_closed_to_it(self):
+        self.rows["b"]["outcome"] = "settled"
+        code, out = self.call(self.good)
+        self.assertEqual(409, code)
+        self.assertIn("Exp-2", out["error"])
+        self.assertEqual([], self.table.writes)
+
+    def test_nothing_is_written_until_every_claim_has_been_checked(self):
+        # A batch that stops half way leaves a stack somebody has to go
+        # through claim by claim to find out what happened.
+        self.rows["b"]["outcome"] = "settled"
+        self.call(self.good)
+        self.assertEqual([], self.table.writes)
+
+    def test_a_claim_from_another_organisation_is_not_found(self):
+        self.rows["a"]["org_id"] = "someone-else"
+        code, _ = self.call(self.good)
+        self.assertEqual(404, code)
+
+    def test_a_submitter_cannot_do_it(self):
+        auth.identity.resolve_by_email = lambda e, channel=None: {
+            "email": e, "org_id": "org1", "role": "staff", "name": "Someone"}
+        code, _ = self.call(self.good)
+        self.assertEqual(403, code)
+
+    def test_finance_may_only_touch_a_claim_that_has_cleared(self):
+        # The same split as setting one: finance corrects the filing on a
+        # claim that has cleared, and a claim still under review belongs to
+        # the reviewer until they release it.
+        auth.identity.resolve_by_email = lambda e, channel=None: {
+            "email": e, "org_id": "org1", "role": "finance", "name": "Madhu"}
+        self.rows["a"].pop("review_action", None)
+        self.rows["a"]["verdict"] = {"verdict": "needs_review",
+                                     "violations": [{"blocks_automatic_decision": True}]}
+        code, out = self.call({"submission_ids": ["a"], "expense_type": "meals"})
+        self.assertEqual(403, code)
+        self.assertIn("still under review", out["error"])
+
+
+class TheConsoleOffersItOnASelection(unittest.TestCase):
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split("function paintBulkFields() {", 1)[1].split(
+            "\n}", 1)[0]
+
+    def test_only_for_more_than_one_claim(self):
+        # Setting a field on a single claim is what the claim page is for,
+        # and it shows the whole bill while you do it.
+        self.assertIn("const show = can.review() && chosen.length > 1;", self.fn)
+
+    def test_the_lists_are_rebuilt_rather_than_cached(self):
+        # Both are editable on other screens, so a list built at load goes
+        # stale the moment somebody adds a type - which is exactly when a
+        # reviewer would reach for it.
+        self.assertIn("rules.types.filter(t => t.enabled)", self.fn)
+        self.assertIn("(ORG_PROFILE.groups || [])", self.fn)
+
+    def test_a_disabled_type_is_not_offered(self):
+        self.assertIn("filter(t => t.enabled)", self.fn)
+
+    def test_the_group_setter_is_absent_where_there_are_no_groups(self):
+        self.assertIn('groupSel.hidden = !show || !(ORG_PROFILE.groups || []).length;',
+                      self.fn)
+
+    def test_it_shows_no_current_value(self):
+        # Twelve claims may carry twelve different types, and a dropdown
+        # showing one of them would be lying about the other eleven.
+        self.assertIn("Set expense type", self.fn)
+        self.assertIn('typeSel.value = "";', self.fn)
+        self.assertIn("Set group", self.fn)
+
+    def test_the_selection_survives_setting_a_field(self):
+        # Setting the type on twelve and then the group on the same twelve is
+        # the ordinary way this gets used.
+        fn = self.app.split("async function setOnPicked(field, value) {", 1)[1] \
+                     .split("\n}", 1)[0]
+        self.assertNotIn("picked.clear()", fn)
