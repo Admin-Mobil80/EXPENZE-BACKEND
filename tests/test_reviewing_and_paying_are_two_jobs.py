@@ -229,3 +229,54 @@ class TheConsoleAsksTheSameTwoQuestions(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ASavedCorrectionIsVisibleToTheConsole(unittest.TestCase):
+    """A claim nobody could approve, however many times they saved it.
+
+    Mobil80-Exp-63: the agent read a handwritten bill as `not_covered`, a
+    reviewer set it to Courier, the server stored it. The row then said
+    "Expense type -> Courier - not saved yet. Save it before approving." after
+    every save, and Approve never appeared.
+
+    The save was working perfectly. `_submission_view` sent the console the
+    *verdict's* expense type and only that, which was true for as long as
+    saving a correction re-audited the claim - the engine ran again under the
+    new type and wrote it back into the verdict. That re-check was removed
+    deliberately, because a claim in front of a person is decided by that
+    person, and this was not followed through: the console's working copy said
+    Courier, the record it compared against said not_covered, and the two could
+    never agree.
+
+    `_claim_review` has always read the answered value when deciding whether a
+    claim may be approved. The view is the same question about the same row.
+    """
+
+    def setUp(self):
+        self.auth = read("lambda_src/auth.py")
+        self.view = self.auth.split("def _submission_view(", 1)[1].split(
+            "\ndef ", 1)[0]
+
+    def test_the_view_prefers_what_a_reviewer_answered(self):
+        self.assertIn('"expense_type": (row.get("answered_expense_type")', self.view)
+        self.assertIn('"currency": row.get("answered_currency") or verdict.get("currency", "")',
+                      self.view)
+
+    def test_and_still_falls_back_to_what_the_agent_read(self):
+        # Every claim decided before a person touched it has no answer on it.
+        self.assertIn('or verdict.get("expense_type")', self.view)
+        self.assertIn('or receipt.get("expense_type", "")', self.view)
+
+    def test_the_gate_and_the_view_read_the_same_field(self):
+        # They disagreed, and the disagreement was invisible: the server would
+        # have approved the claim on the type it was storing, while the console
+        # refused to offer the button on the type it was being sent.
+        review = self.auth.split("def _claim_review(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('item.get("answered_expense_type")', review)
+        self.assertIn('row.get("answered_expense_type")', self.view)
+
+    def test_nothing_re_audits_a_claim_on_save(self):
+        # The reason this mattered. If saving still queued the claim, the
+        # verdict would be rewritten and the view would have been right.
+        retype = self.auth.split("def _claim_retype(", 1)[1].split("\ndef ", 1)[0]
+        self.assertNotIn(":queued", retype)

@@ -3222,8 +3222,28 @@ def _submission_view(row: dict[str, Any], budget_currency: str = "") -> dict[str
         "pulled_by": row.get("pulled_by_name") or row.get("pulled_by", ""),
         "pulled_at": int(row.get("pulled_at") or 0),
         "approved_total": row.get("approved_total", ""),
-        "expense_type": verdict.get("expense_type", receipt.get("expense_type", "")),
-        "currency": verdict.get("currency", ""),
+        # What a reviewer answered beats what the agent read.
+        #
+        # This sent the verdict's type and only that, which was true for as
+        # long as saving a correction re-audited the claim - the engine ran
+        # again under the new type and wrote it back into the verdict. That
+        # re-check was removed deliberately (a claim in front of a person is
+        # decided by that person) and this was not followed through.
+        #
+        # The consequence was a claim nobody could approve. A reviewer set
+        # Mobil80-Exp-63 to Courier, the server stored it, and the console
+        # went on being told the type was `not_covered` - so its working copy
+        # and the record disagreed for ever, the row said "not saved yet"
+        # after every save, and Approve never came back. The save was working
+        # perfectly; there was no way to see that it had.
+        #
+        # `_claim_review` has always read the answered value when it decides
+        # whether a claim may be approved. This is the same question asked of
+        # the same row, so it reads the same field.
+        "expense_type": (row.get("answered_expense_type")
+                         or verdict.get("expense_type")
+                         or receipt.get("expense_type", "")),
+        "currency": row.get("answered_currency") or verdict.get("currency", ""),
         "currency_assumed": bool(verdict.get("currency_assumed")),
         "total": verdict.get("receipt_total"),
         "reimbursable": verdict.get("reimbursable_total"),
