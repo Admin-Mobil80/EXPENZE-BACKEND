@@ -44,11 +44,15 @@ class TheControlIsOnTheClaimPage(unittest.TestCase):
     def test_it_freezes_with_every_other_control(self):
         # One rule, not its own. A settled claim must not offer an editable
         # anything.
-        self.assertIn('["headcount", "src", "etype", "ccy", "claim-group"].forEach',
+        # With the expense type on its own rule, the group stays on the
+        # reviewer's: the settlement form asks it separately where finance
+        # needs it, and two live dropdowns over one value is a question about
+        # which of them wins.
+        self.assertIn('["headcount", "src", "ccy", "claim-group"].forEach',
                       self.app)
 
     def test_changing_it_counts_as_a_change_worth_saving(self):
-        changed = self.app.split("const changed = !frozen", 1)[1].split(";", 1)[0]
+        changed = self.app.split("const changed =", 1)[1].split(";", 1)[0]
         self.assertIn("w.group", changed)
 
     def test_it_says_what_tagged_the_claim(self):
@@ -137,7 +141,7 @@ class PickingAGroupIsNotTheSameAsRecordingOne(unittest.TestCase):
         # pick is the reviewer's own choice. Comparing against it asks whether
         # the choice equals itself.
         for expr in (self.app.split("const isPristine = (sub,w) =>", 1)[1].split(";", 1)[0],
-                     self.app.split("const changed = !frozen", 1)[1].split(";", 1)[0]):
+                     self.app.split("const changed =", 1)[1].split(";", 1)[0]):
             self.assertNotIn("groupOf(sub)", expr)
             self.assertIn("sub.groupId", expr)
 
@@ -146,7 +150,7 @@ class PickingAGroupIsNotTheSameAsRecordingOne(unittest.TestCase):
         # is the test. Reading the value instead makes every claim that has a
         # group look edited, and parks a Save button on all of them.
         for expr in (self.app.split("const isPristine = (sub,w) =>", 1)[1].split(";", 1)[0],
-                     self.app.split("const changed = !frozen", 1)[1].split(";", 1)[0]):
+                     self.app.split("const changed =", 1)[1].split(";", 1)[0]):
             self.assertIn('"group" in w', expr)
 
     def test_clearing_a_group_still_counts_as_a_change(self):

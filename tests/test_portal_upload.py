@@ -272,8 +272,12 @@ class NothingIsInventedBeforeTheBillIsRead(unittest.TestCase):
         # applied by a pass of its own: a second assignment to the same
         # controls does not narrow the first, it replaces it.
         self.assertIn("const unread = res.verdict === \"pending\";", self.app)
-        frozen = self.app.split("const frozen =", 1)[1].split(";", 1)[0]
-        self.assertIn("unread", frozen)
+        # In `busy`, which both rules are built from, so a control on either
+        # of them is dead while the bill is still being read.
+        busy = self.app.split("const busy =", 1)[1].split(";", 1)[0]
+        self.assertIn("unread", busy)
+        for rule in ("const frozen =", "const classFrozen ="):
+            self.assertIn("busy", self.app.split(rule, 1)[1].split(";", 1)[0])
 
     def test_the_page_refreshes_itself_once_the_audit_lands(self):
         # Otherwise the placeholder sits there until somebody reloads.

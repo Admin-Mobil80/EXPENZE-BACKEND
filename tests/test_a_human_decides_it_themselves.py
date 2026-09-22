@@ -198,10 +198,18 @@ class TheButtonSavesAndStops(unittest.TestCase):
         # re-run. There is nothing to re-run.
         self.assertIn("if (unsaved) {", self.app)
 
-    def test_it_posts_the_three_answers(self):
-        self.assertIn("submission_id: sub.id, expense_type: chosen, currency: chosenCcy,",
+    def test_it_posts_the_answers_the_reader_could_actually_give(self):
+        # The type always - it is the one control every role holds. The
+        # currency and the group only where they were editable: reading a
+        # value off a disabled control and posting it anyway makes the server
+        # decide whether to allow a field nobody edited.
+        self.assertIn("submission_id: sub.id, expense_type: chosen,", self.fn)
+        self.assertIn("...(chosenCcy === null ? {} : { currency: chosenCcy })", self.fn)
+        self.assertIn("...(chosenGroup === null ? {} : { group_id: chosenGroup })",
                       self.fn)
-        self.assertIn("group_id: chosenGroup", self.fn)
+        for control, name in (("cs", "ccy"), ("gs", "claim-group")):
+            self.assertIn(f'const {control} = $("{name}");', self.fn)
+            self.assertIn(f"{control} && !{control}.disabled", self.fn)
 
     def test_it_reloads_and_says_what_was_saved(self):
         self.assertIn("await loadRecords();", self.fn)

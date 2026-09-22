@@ -123,11 +123,27 @@ class WhichActionsSitOnWhich(unittest.TestCase):
         self.assertIn('item.get("submitted_by", "")).lower() != actor.lower()',
                       self.review)
 
-    def test_setting_the_expense_type_is_a_review_act(self):
+    def test_setting_the_expense_type_is_not_a_review_act(self):
+        # It classifies rather than prices. On a claim that has cleared, the
+        # amount is fixed at `approved_total`, so re-tagging moves the claim
+        # between reports and moves no money - and finance, who is asked what
+        # the month was spent on, had to go back to a reviewer for a dropdown.
         retype = self.auth.split("def _claim_retype(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn("if not may_review(acting):", retype)
-        self.assertIn("Only an owner or administrator can set the expense type.",
-                      retype)
+        self.assertIn("if not runs_the_org(acting):", retype)
+        self.assertIn("change a claim's expense type.", retype)
+
+    def test_but_the_currency_still_is(self):
+        # Caps are per currency and the payout converts at the rate stamped
+        # for that pair, so changing it changes what somebody is paid.
+        retype = self.auth.split("def _claim_retype(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('if "currency" in body:', retype)
+        self.assertIn("Only an owner or administrator can change the ", retype)
+
+    def test_and_finance_may_only_touch_a_claim_that_has_cleared(self):
+        # Before that it is the reviewer's claim, and its type is part of what
+        # they are deciding.
+        retype = self.auth.split("def _claim_retype(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("if not policy.awaiting_payment(item):", retype)
 
     def test_recording_a_payment_is_not(self):
         outcome = self.auth.split("def _claim_outcome(", 1)[1].split("\ndef ", 1)[0]
@@ -163,6 +179,33 @@ class TheConsoleAsksTheSameTwoQuestions(unittest.TestCase):
 
     def test_the_decision_controls_hang_on_the_higher_one(self):
         self.assertIn("const mayReview = reviewingHere();", self.app)
+
+    def test_finance_holds_the_expense_type_and_nothing_else_on_that_row(self):
+        # It classifies; the rest price. On a claim that has cleared the
+        # amount is fixed, so re-tagging moves it between reports and moves no
+        # money - and finance is who gets asked what the month was spent on.
+        self.assertIn("const classFrozen = busy || !(reviewingHere() || settlingHere());",
+                      self.app)
+        self.assertIn('["etype"].forEach', self.app)
+        self.assertIn('["headcount", "src", "ccy", "claim-group"].forEach', self.app)
+
+    def test_and_has_somewhere_to_record_it(self):
+        # The Save button lives in the reviewer's branch, which finance never
+        # reaches - so without this the control would come alive under them,
+        # take a change, and offer nothing to write it down with.
+        branch = self.app.split("} else if (!mayReview) {", 1)[1].split(
+            "} else if (isPaid(sub)) {", 1)[0]
+        self.assertIn("!isPristine(sub, w) && !classFrozen", branch)
+        self.assertIn("save.addEventListener(\"click\", saveAnswers);", branch)
+
+    def test_the_hint_no_longer_promises_a_re_check(self):
+        # "A change to the type or the currency sends it back through the
+        # policy engine" described the re-check, which was removed: a claim in
+        # front of a person is decided by that person. The sentence outlived
+        # the feature.
+        self.assertNotIn("sends it back through the policy engine", self.app)
+        self.assertNotIn("the verdict recomputes against the same rules", self.app)
+        self.assertIn("not what is paid.", self.app)
 
     def test_the_group_control_defers_to_the_payment_form(self):
         # It hides where the settlement form asks the same thing - which is a

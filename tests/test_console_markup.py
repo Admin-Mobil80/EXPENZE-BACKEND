@@ -2839,16 +2839,24 @@ class ASettledClaimIsDeadInEveryControl(unittest.TestCase):
         # Plus `rechecking`: while the agent has the claim back, the type,
         # the currency and the group are about to be re-judged, so they are
         # not editable either.
-        self.assertIn("const frozen = paid || unread || saving || deciding || !reviewingHere();",
+        self.assertIn("const busy = paid || unread || saving || deciding;",
+                      self.detail)
+        self.assertIn("const frozen = busy || !reviewingHere();", self.detail)
+        # The expense type classifies rather than prices, so finance holds it
+        # too - but every reason a control is dead is still in `busy`.
+        self.assertIn("const classFrozen = busy || !(reviewingHere() || settlingHere());",
                       self.detail)
 
     def test_the_four_controls_are_assigned_exactly_once(self):
         # The regression was a second assignment, so what is pinned is that
         # there is no second one - not the wording of any particular guard.
         self.assertEqual(1, self.detail.count(
-            '["headcount", "src", "etype", "ccy", "claim-group"].forEach'),
+            '["headcount", "src", "ccy", "claim-group"].forEach'),
             "a second pass assigns to these controls again")
+        self.assertEqual(1, self.detail.count('["etype"].forEach'),
+                         "a second pass assigns to the expense type again")
         self.assertEqual(1, self.detail.count("if (el) el.disabled = frozen;"))
+        self.assertEqual(1, self.detail.count("if (el) el.disabled = classFrozen;"))
         self.assertNotIn("el.disabled = unread", self.detail)
 
     def test_nothing_on_a_settled_claim_reads_as_editable(self):

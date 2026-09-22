@@ -1901,12 +1901,25 @@ def _claim_retype(token: str, body: dict[str, Any], origin: str | None) -> dict[
     acting = identity.resolve_by_email(actor, channel=None)
     if not acting:
         return _reply(403, {"error": "No membership for this account."}, origin)
-    # Re-tagging changes what a claim is worth, so it is a reviewer's act -
-    # and reviewing is not a finance executive's job. See `may_review`.
-    if not may_review(acting):
+    # Two of the three fields here price the claim and one classifies it.
+    #
+    # The currency prices it: caps are per currency, and on an approved claim
+    # the payout converts at the rate stamped for that pair, so changing it
+    # changes what somebody is paid. That stays a reviewer's act.
+    #
+    # The expense type prices nothing. It says what kind of expense this is,
+    # and on a claim that has already cleared, the amount is fixed at
+    # `approved_total` - so re-tagging moves the claim between reports and
+    # moves no money. Finance is the last person to hold it and the first to
+    # be asked what the month was spent on, which makes a wrongly tagged claim
+    # their problem; it was not theirs to correct, so they had to go back to a
+    # reviewer for a dropdown.
+    #
+    # The floor is still `runs_the_org`: a submitter classifies nothing.
+    if not runs_the_org(acting):
         return _reply(403, {
-            "error": "Only an owner or administrator can set the expense type."},
-            origin)
+            "error": "Only an owner, administrator or finance executive can "
+                     "change a claim's expense type."}, origin)
 
     # The organisation's own types, not the built-ins. Now that a policy is
     # stored per account, checking against `DEFAULT_RULES` would refuse a type
@@ -1957,6 +1970,25 @@ def _claim_retype(token: str, body: dict[str, Any], origin: str | None) -> dict[
     if item.get("outcome") == "settled":
         return _reply(409, {
             "error": "This claim has already been reimbursed."}, origin)
+
+    # The currency is the reviewer's, and so is any change at all to a claim
+    # still waiting on a decision.
+    #
+    # Checked against the claim rather than against a screen. The console only
+    # sends the fields the reader could edit, which is the right thing for a
+    # form to do and no use as a permission - a console is a page somebody can
+    # have open from before this shipped, and the request is theirs to shape.
+    if not may_review(acting):
+        if "currency" in body:
+            return _reply(403, {
+                "error": "Only an owner or administrator can change the "
+                         "currency. It decides what the payout converts at."},
+                origin)
+        if not policy.awaiting_payment(item):
+            return _reply(403, {
+                "error": "This claim is still under review. Its expense type "
+                         "is the reviewer's to set until they release it."},
+                origin)
 
     # Saved, and that is all. The claim is not sent back round the agent.
     #

@@ -359,8 +359,9 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
         # Expense type again.
         # `deciding` joined it: while a decision is in flight the controls
         # are as dead as they are during a save, and for the same reason.
-        self.assertIn("paid || unread || saving || deciding || !reviewingHere()",
-                      frozen)
+        self.assertIn("busy || !reviewingHere()", frozen)
+        self.assertIn("paid || unread || saving || deciding",
+                      self.app.split("const busy =", 1)[1].split(";", 1)[0])
 
     def test_the_route_is_wired(self):
         with open(os.path.join(ROOT, "expensifyai", "stack.py"), encoding="utf-8") as h:
@@ -515,10 +516,24 @@ class TheControlsOnAClosedClaimAreInert(unittest.TestCase):
             self.auth = h.read()
         self.retype = self.auth.split("def _claim_retype(", 1)[1].split("\ndef ", 1)[0]
 
-    def test_one_rule_governs_every_control(self):
-        self.assertIn('["headcount", "src", "etype", "ccy", "claim-group"].forEach',
+    def test_every_control_is_assigned_from_exactly_one_rule(self):
+        # Two lists now, because the expense type answers to a different
+        # question from the rest - but disjoint, and each assigned once. A
+        # second pass over the same control writes `false` back over the
+        # first, which is the regression this class exists for.
+        self.assertIn('["headcount", "src", "ccy", "claim-group"].forEach',
                       self.app)
+        self.assertIn('["etype"].forEach', self.app)
         self.assertIn("el.disabled = frozen", self.app)
+        self.assertIn("el.disabled = classFrozen", self.app)
+
+    def test_and_the_two_lists_do_not_overlap(self):
+        lists = [self.app.split(f'[{first}', 1)[1].split("].forEach", 1)[0]
+                 for first in ('"headcount"', '"etype"')]
+        names = [set(part.strip().strip('"') for part in one.split(",") if part.strip())
+                 for one in lists]
+        names[0].add("headcount"); names[1].add("etype")
+        self.assertEqual(set(), names[0] & names[1])
 
     def test_money_having_moved_freezes_them(self):
         # Not the decision - the payment. A claim approved and waiting to be
@@ -527,8 +542,12 @@ class TheControlsOnAClosedClaimAreInert(unittest.TestCase):
         # which undoes a decision somebody deliberately made. Once a transfer
         # is recorded, changing what it was for would leave the payment filed
         # against a claim that no longer describes it, and that stays shut.
-        frozen = self.app.split("const frozen =", 1)[1].split(";", 1)[0]
-        self.assertIn("paid", frozen)
+        # `busy` carries it into both rules, so a paid, unread, saving or
+        # deciding claim freezes every control however many rules there are.
+        busy = self.app.split("const busy =", 1)[1].split(";", 1)[0]
+        self.assertIn("paid", busy)
+        for rule in ("const frozen =", "const classFrozen ="):
+            self.assertIn("busy", self.app.split(rule, 1)[1].split(";", 1)[0])
         self.assertIn("const paid = isPaid(sub) || closed;", self.app)
 
     def test_somebody_who_is_not_reviewing_cannot_edit_them(self):
