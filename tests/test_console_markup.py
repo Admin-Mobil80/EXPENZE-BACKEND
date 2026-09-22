@@ -4003,22 +4003,20 @@ class SpendByPerson(unittest.TestCase):
         self.assertIn('$("rp-reimb").textContent = fmt(pending, home);', self.app)
 
 
-class TypingAClaimNothingCoveredIsConfirmed(unittest.TestCase):
-    """Correcting a wrong type is routine. Giving one to a claim that had none
-    is a judgment.
+class TaggingAClaimIsNotConfirmed(unittest.TestCase):
+    """There was a dialog here, and the gate is a better control than it was.
 
-    It decides how the claim is reported and which budget pays it, and it is
-    recorded against the reviewer's name.
+    Giving a type to a claim the agent could not classify is a real judgment:
+    it decides how the claim is reported and which budget pays it, and it is
+    recorded against the reviewer's name. The dialog was not where that
+    judgment lives, though. Nothing is decided by saving - the claim stays
+    exactly where it is, in front of the same person - and Approve is still
+    withheld until both the expense type and the cost centre are recorded.
 
-    It used to decide more: the claim was re-audited on the strength of it and
-    could clear straight into the payment run. It cannot any more - a claim in
-    front of a person is decided by that person - so the question no longer
-    promises that, and it says what is actually true: the claim stays here for
-    them to approve or reject.
-
-    Only asked when it was untagged. A confirmation on every correction is one
-    people learn to click through, and then it is worth nothing on the one that
-    mattered.
+    That gate cannot be clicked through. The dialog could, and taxed the
+    common case to do it: a reviewer working a queue where most claims need a
+    type answered it once per claim, and a confirmation everybody learns to
+    dismiss is worth nothing on the day it matters.
     """
 
     def setUp(self):
@@ -4026,28 +4024,32 @@ class TypingAClaimNothingCoveredIsConfirmed(unittest.TestCase):
             self.app = handle.read()
         self.fn = self.app.split("async function saveAnswers()", 1)[1].split("\n}\n", 1)[0]
 
-    def test_it_asks_only_when_nothing_covered_the_claim(self):
-        self.assertIn('v.code === "no_rule_for_expense_type"', self.fn)
-        self.assertIn("if (untagged && !window.confirm(", self.fn)
+    def test_saving_asks_nothing(self):
+        self.assertNotIn("window.confirm(", self.fn)
 
-    def test_the_question_names_the_type_being_set(self):
-        self.assertIn("Set this claim to ${label0}?", self.fn)
+    def test_but_the_type_is_still_checked_before_it_is_stored(self):
+        # A type that is not one of the configured, enabled ones is refused
+        # here as well as on the server. Relaxing the friction is not the same
+        # as accepting anything.
+        self.assertIn("if (!rules.types.some(t => t.enabled && t.id === chosen))",
+                      self.fn)
 
-    def test_it_says_what_follows(self):
-        self.assertIn("recorded against your name", self.fn)
-        self.assertIn("the claim stays", self.fn)
+    def test_and_approve_still_waits_for_both_answers(self):
+        # The control that replaced the dialog, and the reason removing it is
+        # safe. `typeOk` and `needsGroup` withhold Approve; only Reject is
+        # offered until they are answered.
+        self.assertIn("const typeOk = rules.types.some(t => t.enabled && t.id === w.type);",
+                      self.app)
+        self.assertIn("(!typeOk || unsaved || needsGroup || unreadable)", self.app)
 
-    def test_it_no_longer_promises_an_automatic_release(self):
-        # The sentence outlived the behaviour by one commit. A confirmation
-        # that describes something the product no longer does is worse than
-        # none, because somebody reads it and plans around it.
-        question = self.fn.split("window.confirm(", 1)[1].split(")) return;", 1)[0]
-        self.assertNotIn("clear for payment", question)
-        self.assertNotIn("re-checked", question)
-
-    def test_declining_sends_nothing(self):
-        before = self.fn.split("window.confirm(", 1)[1]
-        self.assertIn(")) return;", before.split("authCall", 1)[0])
+    def test_and_the_server_asks_the_same_two_questions(self):
+        # Because the console is a page somebody can have open from before
+        # this shipped.
+        with open(os.path.join(ROOT, "lambda_src", "auth.py"), encoding="utf-8") as h:
+            auth = h.read()
+        review = auth.split("def _claim_review(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("Set an expense type first.", review)
+        self.assertIn("Set a group first.", review)
 
 
 class TheSettlementListCountsInOneCurrency(unittest.TestCase):

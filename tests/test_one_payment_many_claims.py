@@ -57,7 +57,12 @@ class _Table:
 
 def _row(sid, ref, who, **over):
     row = {"submission_id": sid, "reference": ref, "org_id": "org1",
-           "submitted_by": who, "receipt": {"vendor": "A vendor"}}
+           "submitted_by": who, "receipt": {"vendor": "A vendor"},
+           # Ready to pay: an expense type the policy covers and a cost
+           # centre. A claim missing either is refused at settlement now,
+           # which the tests below check on purpose.
+           "answered_expense_type": "meals", "group_id": "mobil80",
+           "verdict": {"expense_type": "meals", "currency": "INR"}}
     row.update(over)
     return row
 
@@ -84,6 +89,14 @@ class TheEndpointRefusesBeforeItWrites(unittest.TestCase):
             "logged": auth._logged,
             "send": auth.notify.send,
             "record": auth.notify.record,
+            "org_of": auth._org_of,
+        }
+        # The settlement checks read the organisation's policy and groups.
+        # Without this the test reaches for real DynamoDB, which is both slow
+        # and a different thing from what it is trying to test.
+        auth._org_of = lambda actor: {
+            "groups": [{"id": "mobil80", "label": "Mobil80"}],
+            "expense_types": [{"id": "meals", "label": "Meals", "enabled": True}],
         }
         auth._submissions = self.table
         auth._identity_from_token = lambda t: "fin@x.com"
@@ -110,6 +123,7 @@ class TheEndpointRefusesBeforeItWrites(unittest.TestCase):
         auth._logged = self._saved["logged"]
         auth.notify.send = self._saved["send"]
         auth.notify.record = self._saved["record"]
+        auth._org_of = self._saved["org_of"]
 
     def call(self, body):
         reply = auth._claim_settle_batch("tok", body, None)
@@ -192,6 +206,30 @@ class TheEndpointRefusesBeforeItWrites(unittest.TestCase):
         self.call(self.good)
         self.assertEqual("120.00", self.table.writes[0]["ExpressionAttributeValues"][":p"])
 
+    def test_a_claim_with_no_expense_type_is_not_paid(self):
+        # Every payment is reported under one. A payment filed under nothing
+        # is a line in the accounts nobody can explain.
+        self.rows["a"]["answered_expense_type"] = "not_covered"
+        self.rows["a"]["verdict"] = {"expense_type": "not_covered"}
+        code, out = self.call(self.good)
+        self.assertEqual(409, code)
+        self.assertIn("no expense type your policy covers", out["error"])
+        self.assertIn("Exp-1", out["error"])
+        self.assertEqual([], self.table.writes)
+
+    def test_a_claim_with_no_cost_centre_is_not_paid(self):
+        self.rows["b"]["group_id"] = ""
+        code, out = self.call(self.good)
+        self.assertEqual(409, code)
+        self.assertIn("not attributed to a cost centre", out["error"])
+        self.assertEqual([], self.table.writes)
+
+    def test_the_check_names_the_claim_that_stopped_it(self):
+        # Two claims in, one bad: the reviewer has to know which to open.
+        self.rows["b"]["group_id"] = ""
+        _, out = self.call(self.good)
+        self.assertTrue(out["error"].startswith("Exp-2:"), out["error"])
+
     def test_only_somebody_who_can_settle_may_do_this(self):
         auth.identity.resolve_by_email = lambda e, channel=None: {
             "email": e, "org_id": "org1", "role": "staff", "name": "Someone"}
@@ -265,7 +303,13 @@ class TheConsoleOffersItOnlyWhenItMeansSomething(unittest.TestCase):
         # three transfers however it is recorded.
         self.assertIn("const payees = new Set(awaiting.map(c => String(c.sub.who || \"\")));",
                       self.app)
-        self.assertIn("awaiting.length > 1 && payees.size === 1 && can.seeQueue()",
+        self.assertIn("awaiting.length > 1 && payees.size === 1 && allReady",
+                      self.app)
+
+    def test_and_only_when_every_claim_in_it_can_be_paid(self):
+        # The server refuses the whole batch and names one claim, so a button
+        # that opens a form doomed to be refused is a button that lies.
+        self.assertIn("const allReady = awaiting.every(c => !payBlocker(c.sub));",
                       self.app)
 
     def test_the_form_lists_the_claims_rather_than_counting_them(self):
@@ -341,3 +385,57 @@ class RejectingReadsAsRejecting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NothingIsPaidUntilItCanBeFiled(unittest.TestCase):
+    """The same two facts the approval gate asks for, asked where money moves.
+
+    Not redundancy. A claim reaches Pending settlement by two routes and only
+    one of them passes that gate: the agent clears a claim against the policy
+    without any person deciding it. In the ordinary case an agent-cleared
+    claim has both, because `no_rule_for_expense_type` and `group_not_set` are
+    blocking findings and send the doubtful ones to a reviewer. The gap is
+    everything that can change afterwards - a type disabled in the policy, a
+    group deleted, a claim approved before either rule existed.
+
+    Asked here because this is the last moment it can be asked. Once a payment
+    is recorded the claim is filed under whatever it says, and a payment filed
+    under no expense type is a line in the accounts nobody can explain.
+    """
+
+    def setUp(self):
+        self.auth = read("lambda_src/auth.py")
+        self.app = read("../PORTAL/app.html")
+
+    def test_the_rule_is_written_once(self):
+        self.assertIn("def _unready_to_pay(", self.auth)
+
+    def test_a_single_settlement_asks_it(self):
+        outcome = self.auth.split("def _claim_outcome(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('if kind == "settled":', outcome)
+        self.assertIn("_unready_to_pay(item,", outcome)
+
+    def test_a_batch_asks_it_of_every_claim_before_writing_any(self):
+        batch = self.auth.split("def _claim_settle_batch(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("_unready_to_pay(item, org_for_pay)", batch)
+        # Before the loop that writes.
+        self.assertLess(batch.index("_unready_to_pay"), batch.index("update_item"))
+
+    def test_a_rejection_is_not_asked_it(self):
+        # Refusing a claim files nothing, so demanding it be filable first
+        # would stop finance refusing exactly the claims most likely to be
+        # missing something.
+        outcome = self.auth.split("def _claim_outcome(", 1)[1].split("\ndef ", 1)[0]
+        guard = outcome.split("_unready_to_pay", 1)[0]
+        self.assertIn('if kind == "settled":', guard.rsplit("\n\n", 1)[-1])
+
+    def test_the_console_withholds_the_button_and_says_why(self):
+        # Said as the thing to do rather than as an error: finance holds the
+        # expense type on this page and the group is on the form below, so
+        # both answers are within reach of whoever reads the line.
+        self.assertIn("function payBlocker(sub) {", self.app)
+        fn = self.app.split("function renderSettleOnClaim(sub, maySettle) {", 1)[1] \
+                     .split("\n}", 1)[0]
+        self.assertIn("const unready = payBlocker(sub);", fn)
+        self.assertIn("No expense type is set. Set one above", self.app)
+        self.assertIn("No cost centre is set. Set a group above", self.app)

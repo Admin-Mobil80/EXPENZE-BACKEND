@@ -2509,6 +2509,38 @@ def _money_or_zero(value: Any) -> Decimal:
         return Decimal(0)
 
 
+def _unready_to_pay(item: dict[str, Any], org: dict[str, Any]) -> str:
+    """Why this claim cannot be paid yet, or "" when it can.
+
+    The same two facts the approval gate asks for, asked again at the moment
+    the money moves. Not redundancy: a claim reaches Pending settlement by two
+    routes and only one of them passes that gate. The agent clears a claim
+    against the policy without any person deciding it - it raises
+    `no_rule_for_expense_type` and `group_not_set` as blocking findings, which
+    is what sends the doubtful ones to a reviewer, so in the ordinary case an
+    agent-cleared claim has both. The gap is everything that can change
+    afterwards: a type disabled in the policy, a group deleted, a claim
+    approved before either rule existed.
+
+    Asked here because this is the last moment it can be asked. Once a payment
+    is recorded the claim is filed under whatever it says, and a payment filed
+    under no expense type is a line in the accounts nobody can explain - which
+    is the whole reason the approval gate exists.
+    """
+    verdict = item.get("verdict") or {}
+    chosen = str(item.get("answered_expense_type")
+                 or verdict.get("expense_type") or "")
+    if chosen not in set(policy.expense_type_ids(policy.rules_for(org or {}))):
+        return ("This claim has no expense type your policy covers. Set one on "
+                "the claim before paying it - every payment is reported under "
+                "one.")
+    if (org or {}).get("groups") and not str(item.get("group_id") or ""):
+        return ("This claim is not attributed to a cost centre. Set a group on "
+                "the claim before paying it - there is no budget it could come "
+                "out of.")
+    return ""
+
+
 def _claim_review_batch(token: str, body: dict[str, Any],
                         origin: str | None) -> dict[str, Any]:
     """Approve several claims that were each already ready to be approved.
@@ -2676,6 +2708,7 @@ def _claim_settle_batch(token: str, body: dict[str, Any],
                      "one line on the bank statement."}, origin)
 
     # Read every claim first, and refuse the whole batch on anything wrong.
+    org_for_pay = _org_of(actor) or {}
     rows, total, claimant_email = [], Decimal(0), ""
     for line in lines:
         if not isinstance(line, dict):
@@ -2700,6 +2733,12 @@ def _claim_settle_batch(token: str, body: dict[str, Any],
                 "error": "These claims belong to different people. One payment "
                          "covers one person's claims."}, origin)
         claimant_email = claimant_email or who
+
+        blocker = _unready_to_pay(item, org_for_pay)
+        if blocker:
+            return _reply(409, {
+                "error": f"{item.get('reference') or submission_id}: {blocker}"},
+                origin)
 
         rows.append((submission_id, item, amount))
         total += amount
@@ -2844,6 +2883,12 @@ def _claim_outcome(token: str, body: dict[str, Any], origin: str | None) -> dict
     claimant = identity.resolve_by_email(str(item.get("submitted_by", "")), channel=None)
     if not claimant:
         return _reply(409, {"error": "That claim has no active claimant to notify."}, origin)
+
+    # Paying it files it. A rejection does not, so it is not asked of one.
+    if kind == "settled":
+        blocker = _unready_to_pay(item, _org_of(actor) or {})
+        if blocker:
+            return _reply(409, {"error": blocker}, origin)
 
     now = int(time.time())
     claim = {
