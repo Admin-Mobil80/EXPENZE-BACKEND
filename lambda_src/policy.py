@@ -538,3 +538,44 @@ def evaluate_policy(
         "line_items": decided,
         "policy_version": f"v{rules.get('version', 1)}",
     }
+
+
+def awaiting_payment(item: dict) -> bool:
+    """Whether this claim has cleared and is waiting for the money.
+
+    One rule, in one place, because three things ask it and they were drifting
+    apart. The console's `payableClaims` builds the Pending settlement list
+    from it; `digest._cleared_at` decides who finance is emailed about; and
+    `_claim_review` uses it to tell a rejection *at settlement* - which is
+    finance declining to pay - from a rejection *at review*, which is an
+    owner's or an administrator's decision about what the company owes. Three
+    implementations of one sentence is how a tab, an email and a permission
+    come to disagree about the same claim.
+
+    Two ways in and both count: a person approved it after review, or the agent
+    cleared it against the policy and nobody had to. Out again: a second
+    document of a claim is not a second thing to pay, a settled one is not
+    waiting, and a rejected one is the opposite outcome rather than a payment
+    of nothing.
+
+    Deliberately says nothing about *when*. The callers that need a timestamp
+    take it from the row themselves, because they take different ones - the
+    review stamp for a claim a person approved, the audit stamp for one the
+    agent released.
+    """
+    if str(item.get("companion_of") or ""):
+        return False
+    if str(item.get("outcome") or ""):
+        return False
+
+    action = str(item.get("review_action") or "")
+    if action == "approved":
+        return True
+    if action:
+        return False
+
+    verdict = item.get("verdict") or {}
+    if str(verdict.get("verdict") or "") not in ("approved", "partially_approved"):
+        return False
+    return not any(v.get("blocks_automatic_decision")
+                   for v in (verdict.get("violations") or []))

@@ -118,7 +118,7 @@ class WithdrawingYourOwnClaim(unittest.TestCase):
 
     def test_the_reviewer_gate_applies_only_to_reviewer_actions(self):
         # Otherwise an ordinary member of staff cannot withdraw anything.
-        self.assertIn('action in DECIDING_ACTIONS and not may_review(acting)',
+        self.assertIn('action in DECIDING_ACTIONS and action != "rejected"',
                       self.body)
 
     def test_only_the_person_who_submitted_it_may_withdraw_it(self):
@@ -232,7 +232,11 @@ class APaidClaimIsClosedToDecisions(unittest.TestCase):
 
     def test_send_back_and_withdraw_read_the_same_rule(self):
         # Each checking `paidFor` for itself is how one of them came to forget.
-        self.assertIn("if (mayReview && !isPaid(sub) && !rejections[sub.id])", self.app)
+        # `settlingHere`, not `mayReview`: this claim is in Pending settlement
+        # by definition, so the person looking at it is the person about to pay
+        # it, and declining to pay is theirs.
+        self.assertIn("if (settlingHere() && !isPaid(sub) && !rejections[sub.id])",
+                      self.app)
         self.assertIn("isMine(sub) && !mayReview && !isPaid(sub)", self.app)
 
     def test_a_part_payment_still_leaves_the_settlement_bar(self):
@@ -455,23 +459,35 @@ class ASettledClaimSaysSettled(unittest.TestCase):
         # An agent-cleared claim that was then paid has no `decision` at all.
         self.assertIn("if (decision || settlementStage(sub)) {", self.app)
 
-    def test_an_approved_claim_offers_no_way_to_undo_the_approval(self):
+    def test_the_reviewer_who_just_decided_is_not_offered_the_other_answer(self):
         # This row held Reopen, which put the claim back in the queue, then a
-        # rejection at settlement, then "Reject anyway". All three were answers
-        # to "what if the bill never arrives", and none of them belonged in
-        # front of the person who had just decided the claim.
-        #
-        # A decision is a decision. The reviewer read the bill, the findings
-        # and the figures and said yes; the submitter has been told so in
-        # writing and is expecting the money. Offering to take it back in the
-        # same breath makes the approval look provisional, and it put the one
-        # red button on the screen beside a tick - read, reasonably, as the
-        # approval having failed.
+        # rejection at settlement, then "Reject anyway". Each was placed by the
+        # claim's state, and the state is the wrong thing to place it by: a
+        # reviewer who has just approved a claim is not being asked whether to
+        # pay it. Offering to take the decision back in the same breath makes
+        # the approval look provisional, and it put the one red button on the
+        # screen beside a tick a reviewer had just earned.
         self.assertNotIn('decide(sub, "Reopen"', self.app)
-        self.assertNotIn('no.textContent = "Reject anyway"', self.app)
         decided = self.app.split("} else if (decision || settlementStage(sub)) {", 1)[1] \
                           .split("} else if (agentMayRelease(sub)) {", 1)[0]
-        self.assertNotIn("settle_rejected", decided)
+        self.assertIn('claimFrom !== "queue"', decided)
+
+    def test_but_finance_paying_it_is(self):
+        # Same claim, different reader, different question: "the bill never
+        # arrived" and "the paper does not match" are finance's reasons, and
+        # nobody else is placed to have them.
+        decided = self.app.split("} else if (decision || settlementStage(sub)) {", 1)[1] \
+                          .split("} else if (agentMayRelease(sub)) {", 1)[0]
+        self.assertIn("settlingHere() && !isPaid(sub)", decided)
+        self.assertIn('openReasonForm(sub, "settle_rejected", "Rejected")', decided)
+
+    def test_and_the_line_is_the_one_the_payment_controls_already_draw(self):
+        # `renderSettleOnClaim` returns early on a claim opened from the queue
+        # for exactly this reason. Two rules about one distinction is how they
+        # come to disagree.
+        settle = self.app.split("function renderSettleOnClaim(sub, maySettle) {",
+                                1)[1].split("\n}", 1)[0]
+        self.assertIn('if (claimFrom === "queue") return;', settle)
 
     def test_a_claim_the_agent_released_can_still_be_refused(self):
         # Different question. That claim has never been in front of a person,

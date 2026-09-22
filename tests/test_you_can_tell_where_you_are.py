@@ -159,8 +159,10 @@ class ApprovingDoesNotHandYouAPaymentRun(unittest.TestCase):
         # added above it should not decide whether this passes.
         actions = self.app.split('const abox = $("actions")', 1)[1].split(
             "} else if (agentMayRelease(sub)) {", 1)[0]
-        self.assertNotIn("Reject anyway", actions)
-        self.assertNotIn("settle_rejected", actions)
+        self.assertIn('claimFrom !== "queue"', actions)
+        # And it is finance's bar, not the reviewer's: a finance executive may
+        # not decide a claim and may certainly decline to pay one.
+        self.assertIn("settlingHere() && !isPaid(sub)", actions)
 
     def test_but_it_is_not_the_only_thing_on_offer(self):
         # It was, and that is the whole complaint: a tick, a name, and one red

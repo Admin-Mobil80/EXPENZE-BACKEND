@@ -48,22 +48,49 @@ class FinanceIsToldWhenThereIsSomethingToPay(unittest.TestCase):
         self.assertIn("def _cleared_at(", self.digest)
         self.assertIn("def ready_to_pay_digest(", self.notify)
 
+    def test_whether_a_claim_is_waiting_is_asked_in_one_place(self):
+        # Three things ask it and they were drifting: the console builds
+        # Pending settlement from it, this decides who finance hears about, and
+        # `_claim_review` uses it to tell a rejection at settlement from one at
+        # review. Three implementations of one sentence is how a tab, an email
+        # and a permission come to disagree about the same claim.
+        with open(os.path.join(ROOT, "lambda_src", "policy.py"),
+                  encoding="utf-8") as h:
+            pol = h.read()
+        self.assertIn("def awaiting_payment(", pol)
+        fn = self.digest.split("def _cleared_at(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("if not policy.awaiting_payment(row):", fn)
+        with open(os.path.join(ROOT, "lambda_src", "auth.py"), encoding="utf-8") as h:
+            self.assertIn("policy.awaiting_payment(item)", h.read())
+
     def test_both_ways_a_claim_can_clear_are_counted(self):
         # A person approved it, or the agent cleared it against the policy and
         # nobody had to. Both put money on finance's desk.
-        fn = self.digest.split("def _cleared_at(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn('if action == "approved":', fn)
-        self.assertIn('row.get("review_at")', fn)
-        self.assertIn('("approved", "partially_approved")', fn)
-        self.assertIn('row.get("audited_at")', fn)
+        import policy
+        approved = {"review_action": "approved", "verdict": {}}
+        self.assertTrue(policy.awaiting_payment(approved))
+        released = {"verdict": {"verdict": "approved", "violations": []}}
+        self.assertTrue(policy.awaiting_payment(released))
 
     def test_and_the_ones_that_are_not_finance_s_problem_are_left_out(self):
-        fn = self.digest.split("def _cleared_at(", 1)[1].split("\ndef ", 1)[0]
         # A second document of a claim is not a second thing to pay; a settled
         # one is not waiting; a rejected one is the opposite outcome.
-        self.assertIn('row.get("companion_of")', fn)
-        self.assertIn('row.get("outcome")', fn)
-        self.assertIn("blocks_automatic_decision", fn)
+        import policy
+        base = {"review_action": "approved", "verdict": {}}
+        self.assertFalse(policy.awaiting_payment({**base, "companion_of": "Exp-47"}))
+        self.assertFalse(policy.awaiting_payment({**base, "outcome": "settled"}))
+        self.assertFalse(policy.awaiting_payment({**base, "review_action": "rejected"}))
+        self.assertFalse(policy.awaiting_payment(
+            {"verdict": {"verdict": "approved",
+                         "violations": [{"blocks_automatic_decision": True}]}}))
+
+    def test_when_it_became_finance_s_is_this_module_s_own_question(self):
+        # A claim a person approved has been finance's since they approved it;
+        # one the agent released has been since it was read. Two stamps, and
+        # the shared rule deliberately says nothing about either.
+        fn = self.digest.split("def _cleared_at(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('row.get("review_at")', fn)
+        self.assertIn('row.get("audited_at")', fn)
 
     def test_the_two_timestamp_units_on_one_row_are_normalised(self):
         # `received_at` is milliseconds and `review_at` and `audited_at` are

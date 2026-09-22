@@ -2138,10 +2138,19 @@ def _claim_review(token: str, body: dict[str, Any], origin: str | None) -> dict[
     # people whose job that is - so it sits at the lower gate. Everything else
     # here settles whether somebody is paid, and that is an owner's or an
     # administrator's to settle.
-    if action in DECIDING_ACTIONS and not may_review(acting):
+    # A rejection is two different acts wearing one name, so it is not settled
+    # here: the cheap gate only keeps out somebody with no standing at all, and
+    # the real question is asked below, once the claim itself has been read.
+    # See `_claim_review`'s rejection gate.
+    if action in DECIDING_ACTIONS and action != "rejected" and not may_review(acting):
         return _reply(403, {
             "error": "Only an owner or administrator can decide a claim. A "
                      "finance executive can send it back for review."
+        }, origin)
+    if action == "rejected" and not runs_the_org(acting):
+        return _reply(403, {
+            "error": "Only an owner, administrator or finance executive can "
+                     "refuse a claim."
         }, origin)
     if action in REVIEW_ACTIONS and action not in DECIDING_ACTIONS \
             and not runs_the_org(acting):
@@ -2164,6 +2173,33 @@ def _claim_review(token: str, body: dict[str, Any], origin: str | None) -> dict[
     item = _submissions.get_item(Key={"submission_id": submission_id}).get("Item") if submission_id else None
     if not item or item.get("org_id") != acting.get("org_id"):
         return _reply(404, {"error": "No claim found."}, origin)
+
+    # Refusing to pay a claim, as against refusing the claim.
+    #
+    # They are one word and two acts, done by two roles at two moments. At
+    # review a rejection *is* the decision - what the company owes, and whether
+    # this person is owed it - and that stays where every other decision is, at
+    # owner or administrator. Once the claim has cleared, the judgment has been
+    # made and the submitter has been told; what is left is whether the money
+    # goes. The bill never arrived, the paper does not match what was claimed,
+    # the supplier was already paid direct - those are finance's reasons,
+    # nobody else is placed to have them, and finance is the role this product
+    # asks to move the money.
+    #
+    # Read off the claim rather than off a screen name. The console picks which
+    # button to draw from where the reader is standing, which is right for a
+    # button and no use as a permission: a console is a page somebody can have
+    # open from before this shipped, and where the reader stands is a variable
+    # in it.
+    # `policy.awaiting_payment` is the rule the Pending settlement list is
+    # built from, so what finance may refuse is exactly what finance can see.
+    if action == "rejected" and not may_review(acting) \
+            and not policy.awaiting_payment(item):
+        return _reply(403, {
+            "error": "Only an owner or administrator can refuse a claim that "
+                     "is still under review. Once it has been approved, a "
+                     "finance executive can decline to pay it."
+        }, origin)
 
     # Money has moved. Nothing decided from here on can be true of a claim that
     # has already been paid: approving it changes nothing, rejecting it says a

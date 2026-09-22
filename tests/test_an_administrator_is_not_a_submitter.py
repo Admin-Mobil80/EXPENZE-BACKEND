@@ -102,8 +102,8 @@ class TheServerAsksTheRankToo(unittest.TestCase):
     def test_deciding_a_claim_is_ranked(self):
         # Deciding one is ranked higher still - an owner's or an
         # administrator's, never a finance executive's. See `may_review`.
-        self.assertIn("if action in DECIDING_ACTIONS and not may_review(acting):",
-                      self.auth)
+        self.assertIn('if action in DECIDING_ACTIONS and action != "rejected" '
+                      'and not may_review(acting):', self.auth)
         self.assertIn("and not runs_the_org(acting):", self.auth)
 
     def test_the_refusals_name_the_role_that_is_now_allowed(self):

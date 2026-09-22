@@ -44,6 +44,7 @@ import boto3
 
 import identity
 import notify
+import policy
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -116,32 +117,19 @@ def _rows(org_id: str) -> list[dict[str, Any]]:
 def _cleared_at(row: dict[str, Any]) -> int:
     """When this claim became finance's to pay, in milliseconds. 0 if it is not.
 
-    The console's `payableClaims` draws this line and this follows it exactly,
-    because the two are read side by side: an email saying three claims are
-    waiting, over a tab badge saying two, is worse than no email at all.
+    Whether it is waiting at all is `policy.awaiting_payment`, shared with the
+    console's Pending settlement list and with the permission that lets finance
+    refuse to pay one. An email saying three claims are waiting, over a tab
+    badge saying two, is worse than no email at all.
 
-    A second document of a claim is not a second thing to pay. A settled one is
-    not waiting. A rejected one is the opposite outcome, not a payment of zero.
-    What is left is a claim a person approved, or one the agent cleared with
-    nothing blocking it and nobody needed.
+    When is this function's own: a claim a person approved has been finance's
+    since they approved it, and one the agent released has been since it was
+    read.
     """
-    if str(row.get("companion_of") or ""):
+    if not policy.awaiting_payment(row):
         return 0
-    if row.get("outcome"):
-        return 0
-
-    action = str(row.get("review_action") or "")
-    if action == "approved":
+    if str(row.get("review_action") or "") == "approved":
         return _ms(row.get("review_at"))
-    if action:
-        return 0
-
-    verdict = row.get("verdict") or {}
-    if str(verdict.get("verdict") or "") not in ("approved", "partially_approved"):
-        return 0
-    if any(v.get("blocks_automatic_decision")
-           for v in (verdict.get("violations") or [])):
-        return 0
     return _ms(row.get("audited_at"))
 
 

@@ -86,8 +86,29 @@ class WhichActionsSitOnWhich(unittest.TestCase):
                       self.auth)
 
     def test_and_are_gated_on_the_higher_bar(self):
-        self.assertIn("if action in DECIDING_ACTIONS and not may_review(acting):",
+        self.assertIn('if action in DECIDING_ACTIONS and action != "rejected" '
+                      'and not may_review(acting):', self.review)
+
+    def test_refusing_to_pay_is_not_the_same_act_as_refusing_the_claim(self):
+        # One word, two acts, two roles, two moments. At review a rejection is
+        # the decision - what the company owes - and stays at owner or
+        # administrator. Once the claim has cleared, the judgment is made and
+        # the submitter has been told; what is left is whether the money goes,
+        # and "the bill never arrived" is finance's reason to have.
+        #
+        # The same shape as `disputed` on the lower bar: neither lets a finance
+        # executive decide what the company owes.
+        self.assertIn('if action == "rejected" and not runs_the_org(acting):',
                       self.review)
+        self.assertIn('if action == "rejected" and not may_review(acting)',
+                      self.review)
+        self.assertIn("not policy.awaiting_payment(item)", self.review)
+
+    def test_the_permission_is_read_off_the_claim_not_off_a_screen(self):
+        # The console picks which button to draw from where the reader is
+        # standing, which is right for a button and no use as a permission: a
+        # console is a page somebody can have open from before this shipped.
+        self.assertNotIn("claimFrom", self.auth)
 
     def test_sending_one_back_is_not_deciding(self):
         # It hands the claim to a reviewer rather than resolving it, which is
