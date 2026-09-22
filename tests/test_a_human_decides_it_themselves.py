@@ -96,84 +96,89 @@ class NothingReDecidesAClaimBehindTheReviewer(unittest.TestCase):
         self.assertIn("_run_policy(", audit)
 
 
-class EveryApprovedClaimCarriesAnExpenseType(unittest.TestCase):
+class ApprovingDoesNotWaitForTheFilingFields(unittest.TestCase):
+    """The expense type and the cost centre used to withhold Approve.
+
+    They were both required, refusing the approval until they were set, and
+    that put the requirement in the wrong place. Approving is a judgment about
+    whether the company owes this money. The type and the group are about how
+    the payment is *filed*, and filing is what finance does - so a reviewer
+    who had read the bill and decided it was legitimate was being stopped by
+    two dropdowns that say nothing about that decision.
+
+    It showed. Eighteen of twenty claims in the live queue were missing one of
+    them, which made the queue unworkable and bulk approval pointless.
+
+    The requirement moved rather than went. `_unready_to_pay` refuses the
+    *settlement* without both, so nothing can be paid - and therefore nothing
+    reported - under a missing type or an unnamed cost centre. That is the
+    last moment either can be asked and the first moment either matters.
+    """
 
     def setUp(self):
         self.auth = read("lambda_src/auth.py")
         self.review = self.auth.split("def _claim_review(", 1)[1].split(
             "\ndef ", 1)[0]
 
-    def test_the_gate_asks_about_the_claim_not_the_agents_finding(self):
-        # `blocks_on(verdict, "no_rule_for_expense_type")` asked whether the
-        # agent had objected, which is a different question and got both
-        # answers wrong: a verdict older than the rule that now covers it was
-        # refused with its type already right, and a claim tagged
-        # `not_covered` without a blocking finding went through untagged.
-        self.assertNotIn('policy.blocks_on(verdict, "no_rule_for_expense_type")',
-                         self.review)
-        self.assertIn('chosen = str(item.get("answered_expense_type")',
-                      self.review)
-        self.assertIn('or verdict.get("expense_type") or "")', self.review)
+    def test_an_approval_is_not_refused_for_a_missing_type(self):
+        self.assertNotIn("Set an expense type first.", self.review)
 
-    def test_it_is_checked_against_the_enabled_types_in_the_policy(self):
-        self.assertIn("known = set(policy.expense_type_ids(", self.review)
-        self.assertIn("if chosen not in known:", self.review)
+    def test_nor_for_a_missing_cost_centre(self):
+        self.assertNotIn("Set a group first.", self.review)
 
-    def test_not_covered_cannot_be_approved(self):
-        # It is the agent saying it cannot tell, which is exactly the case a
-        # person is meant to answer. `expense_type_ids` lists configured
-        # enabled types and never includes it.
-        ids = read("lambda_src/policy.py").split(
-            "def expense_type_ids(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn('t.get("enabled", True)', ids)
-        self.assertNotIn("not_covered", ids)
+    def test_the_requirement_is_asked_where_the_money_moves(self):
+        self.assertIn("def _unready_to_pay(", self.auth)
+        outcome = self.auth.split("def _claim_outcome(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("_unready_to_pay(item,", outcome)
 
-    def test_the_refusal_says_why_it_matters(self):
-        self.assertIn("Set an expense type first. Every claim is reported ",
-                      self.review)
+    def test_and_it_still_asks_about_the_claim_as_it_stands(self):
+        # A reviewer's answer if they gave one, the agent's reading otherwise,
+        # against the types enabled in the policy right now - not against what
+        # the verdict happened to block on when it was written.
+        fn = self.auth.split("def _unready_to_pay(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('item.get("answered_expense_type")', fn)
+        self.assertIn("policy.expense_type_ids(policy.rules_for(org", fn)
 
-    def test_rejecting_needs_no_type(self):
-        # Refusing a claim attributes nothing to anything.
-        gate = self.review.split('if action == "approved":', 1)[1].split(
-            "\n\n", 1)[0]
-        self.assertIn('action == "approved"',
-                      self.review.split("known = set(", 1)[0][-900:])
-        self.assertNotIn("rejected", gate)
-
-    def test_a_group_is_still_required_too(self):
-        self.assertIn("Set a group first.", self.review)
+    def test_a_rejection_is_asked_neither(self):
+        # It files nothing. Demanding a claim be filable before it can be
+        # refused would stop finance refusing exactly the claims most likely
+        # to be missing something.
+        fn = self.auth.split("def _claim_outcome(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('if kind == "settled":', fn.split("_unready_to_pay", 1)[0])
 
 
 class TheConsoleAsksTheSameQuestion(unittest.TestCase):
+    """And the console offers Approve on the same terms the server accepts it.
+
+    What still withholds it: an edit that has not reached the server, and a
+    receipt nobody could read. Neither is about filing - one is a change the
+    reviewer can see and the record cannot, the other is a claim with no
+    amount in it to approve.
+    """
 
     def setUp(self):
         self.app = read("../PORTAL/app.html")
-        self.detail = self.app.split("function renderDetail() {", 1)[1].split(
-            "\nfunction ", 1)[0]
 
-    def test_approve_appears_only_with_a_configured_type_on_the_claim(self):
-        self.assertIn(
-            "const typeOk = rules.types.some(t => t.enabled && t.id === w.type);",
-            self.detail)
-        self.assertIn("const choices = (!typeOk || unsaved || needsGroup || unreadable)",
-                      self.detail)
+    def test_approve_waits_only_for_those_two(self):
+        self.assertIn("const choices = (unsaved || unreadable)", self.app)
 
     def test_reject_is_always_offered(self):
-        block = self.detail.split(
-            "const choices = (!typeOk || unsaved || needsGroup || unreadable)",
-            1)[1].split(";", 1)[0]
-        self.assertEqual(2, block.count('"Rejected"'),
-                         "both arms of the choice offer Reject")
+        choices = self.app.split("const choices = (unsaved || unreadable)", 1)[1] \
+                          .split(";", 1)[0]
+        self.assertEqual(2, choices.count('"Reject","danger","Rejected"'))
 
-    def test_the_stored_finding_no_longer_gates_anything(self):
-        # It is the agent's record of its own reading, not a question about
-        # whether this claim can be paid.
-        self.assertNotIn(
-            'const untagged = res.violations.some(v => v.code === "no_rule_for_expense_type");',
-            self.detail)
+    def test_the_message_says_what_is_outstanding_not_what_is_blocked(self):
+        # Finance cannot pay a claim missing either, so saying so here saves
+        # them coming back - but a reviewer who knows the bill is good can
+        # approve it and move on.
+        self.assertIn("You can still approve it; finance cannot pay ", self.app)
 
-    def test_the_message_states_the_requirement(self):
-        self.assertIn("Every claim is reported under one, so this ", self.detail)
+    def test_the_findings_no_longer_say_before_approving(self):
+        # They said "Set it before approving", which stopped being true.
+        worker = read("lambda_src/auditor_worker.py")
+        self.assertNotIn("Set it before approving.", worker)
+        self.assertIn("it cannot be paid without one", worker)
+        self.assertNotIn("before approving it.", self.app)
 
 
 class TheButtonSavesAndStops(unittest.TestCase):

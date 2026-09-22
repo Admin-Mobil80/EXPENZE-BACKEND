@@ -102,10 +102,14 @@ class NobodyIsAskedWhichGroup(unittest.TestCase):
         self.assertNotIn("awaiting their reply", returned)
         self.assertIn("not set", returned)
 
-    def test_an_unresolved_group_stops_the_claim_for_a_person(self):
+    def test_an_unresolved_group_still_brings_the_claim_to_a_person(self):
+        # It no longer stops the approval - that is asked at settlement now -
+        # but it is still why the claim is in front of somebody, and the
+        # finding says what it actually costs rather than what it blocks.
         worker = src("lambda_src", "auditor_worker.py")
         self.assertIn('"code": "group_not_set"', worker)
-        self.assertIn("Set it before approving.", worker)
+        self.assertIn("it cannot be paid without one", worker)
+        self.assertNotIn("Set it before approving.", worker)
 
 
 class PickingAGroupIsNotTheSameAsRecordingOne(unittest.TestCase):

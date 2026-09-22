@@ -140,22 +140,26 @@ class ApproveIsWithheld(unittest.TestCase):
         self.assertIn(
             'const unreadable = res.violations.some(v => v.code === "nothing_read");',
             self.detail)
-        self.assertIn(
-            "const choices = (!typeOk || unsaved || needsGroup || unreadable)",
-            self.detail)
+        # The expense type and the cost centre no longer withhold Approve -
+        # they are about filing, and are asked at settlement. An unreadable
+        # receipt still does, for a different reason: there is no amount in it
+        # to approve, and setting a type on it does not create one.
+        self.assertIn("const choices = (unsaved || unreadable)", self.detail)
 
     def test_reject_is_still_offered(self):
         block = self.detail.split(
-            "const choices = (!typeOk || unsaved || needsGroup || unreadable)",
+            "const choices = (unsaved || unreadable)",
             1)[1].split(";", 1)[0]
         self.assertEqual(2, block.count('"Rejected"'))
 
-    def test_it_is_named_before_the_expense_type(self):
+    def test_it_is_named_before_what_is_merely_outstanding(self):
         # Setting a type on a claim with no figures does not create an amount,
-        # so telling somebody to set one first is sending them the wrong way.
+        # so leading with the type would send somebody the wrong way. The type
+        # and the cost centre are now things finance will need; this is the
+        # thing that makes the claim undecidable.
         note = self.detail.split("s.textContent = unsaved", 1)[1]
         self.assertLess(note.index("Nothing was read off this receipt"),
-                        note.index("Set an expense type above"))
+                        note.index("You can still approve it"))
 
     def test_the_other_way_out_is_named(self):
         self.assertIn("ask for a clearer photograph of the same bill",

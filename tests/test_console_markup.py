@@ -4034,22 +4034,16 @@ class TaggingAClaimIsNotConfirmed(unittest.TestCase):
         self.assertIn("if (!rules.types.some(t => t.enabled && t.id === chosen))",
                       self.fn)
 
-    def test_and_approve_still_waits_for_both_answers(self):
-        # The control that replaced the dialog, and the reason removing it is
-        # safe. `typeOk` and `needsGroup` withhold Approve; only Reject is
-        # offered until they are answered.
-        self.assertIn("const typeOk = rules.types.some(t => t.enabled && t.id === w.type);",
-                      self.app)
-        self.assertIn("(!typeOk || unsaved || needsGroup || unreadable)", self.app)
-
-    def test_and_the_server_asks_the_same_two_questions(self):
-        # Because the console is a page somebody can have open from before
-        # this shipped.
+    def test_the_type_is_asked_for_where_it_is_needed(self):
+        # The dialog is gone and so is the approval gate. What remains is the
+        # settlement check: nothing can be paid, and therefore nothing
+        # reported, under a type the policy does not cover.
         with open(os.path.join(ROOT, "lambda_src", "auth.py"), encoding="utf-8") as h:
             auth = h.read()
+        self.assertIn("def _unready_to_pay(", auth)
         review = auth.split("def _claim_review(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn("Set an expense type first.", review)
-        self.assertIn("Set a group first.", review)
+        self.assertNotIn("Set an expense type first.", review)
+        self.assertNotIn("Set a group first.", review)
 
 
 class TheSettlementListCountsInOneCurrency(unittest.TestCase):

@@ -268,16 +268,18 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
         with open(os.path.join(ROOT, "..", "PORTAL", "app.html"), encoding="utf-8") as h:
             self.app = h.read()
 
-    def test_approval_is_refused_without_a_configured_type(self):
-        self.assertIn("Set an expense type first.", self.review)
-        self.assertIn("if chosen not in known:", self.review)
+    def test_approving_one_no_longer_waits_for_a_type(self):
+        # It waits at settlement instead. Approving is a judgment about
+        # whether the money is owed; the type is about how the payment is
+        # filed, and filing is finance's.
+        self.assertNotIn("Set an expense type first.", self.review)
+        self.assertIn("def _unready_to_pay(", self.auth)
 
-    def test_rejecting_one_is_still_allowed(self):
+    def test_rejecting_one_was_always_allowed(self):
         # "Nothing covers this" is a perfectly good reason to refuse a claim,
         # and forcing a type on it first would be make-believe.
-        guard = self.review.split("known = set(policy.expense_type_ids(",
-                                  1)[1].split("origin)", 1)[0]
-        self.assertNotIn("rejected", guard)
+        outcome = self.auth.split("def _claim_outcome(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('if kind == "settled":', outcome.split("_unready_to_pay", 1)[0])
 
     def test_a_reviewer_can_set_the_type_and_it_is_recorded(self):
         self.assertIn("answered_expense_type = :t", self.retype)
@@ -296,14 +298,13 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
     def test_a_settled_claim_cannot_be_retyped(self):
         self.assertIn('item.get("outcome") == "settled"', self.retype)
 
-    def test_the_console_withholds_approve_and_says_why(self):
+    def test_the_console_says_what_is_outstanding_without_blocking(self):
+        # Finance cannot pay a claim missing either, so the reviewer is told -
+        # but they can still approve it and move on.
         self.assertIn("const typeOk = rules.types.some(t => t.enabled && t.id === w.type);",
                       self.app)
-        block = self.app.split(
-            "const choices = (!typeOk || unsaved || needsGroup || unreadable)",
-            1)[1].split(";", 1)[0]
-        self.assertIn("Reject", block)
-        self.assertNotIn("Approve as reviewed", block.split("[[", 1)[0] + block.split("]]", 1)[0])
+        self.assertIn("You can still approve it; finance cannot pay ", self.app)
+        self.assertIn("const choices = (unsaved || unreadable)", self.app)
 
     def test_approve_also_waits_for_an_unsaved_change_to_be_saved(self):
         # Everything above the buttons is a preview the moment a reviewer
@@ -311,13 +312,13 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
         self.assertIn("const unsaved = !isPristine(sub, w);", self.app)
         self.assertIn("Save it before approving.", self.app)
 
-    def test_the_unsaved_message_wins_over_the_requirement(self):
+    def test_the_unsaved_message_wins_over_what_is_outstanding(self):
         # A reviewer who has just set the type is told to save it, not told to
         # set it. Being handed back an instruction you have visibly already
         # followed is how a product loses trust in everything else it says.
         note = self.app.split("s.textContent = unsaved", 1)[1]
         self.assertLess(note.index("Save it before approving"),
-                        note.index("Set an expense type above"))
+                        note.index("You can still approve it"))
 
     def test_the_note_names_the_change_rather_than_announcing_one(self):
         # "You have unsaved changes" makes a reviewer hunt for what they

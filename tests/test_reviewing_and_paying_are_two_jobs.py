@@ -271,8 +271,10 @@ class ASavedCorrectionIsVisibleToTheConsole(unittest.TestCase):
         # They disagreed, and the disagreement was invisible: the server would
         # have approved the claim on the type it was storing, while the console
         # refused to offer the button on the type it was being sent.
-        review = self.auth.split("def _claim_review(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn('item.get("answered_expense_type")', review)
+        # The check moved to settlement, and it reads the same field the view
+        # does. They disagreed once, invisibly, and that is the point here.
+        pay = self.auth.split("def _unready_to_pay(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('item.get("answered_expense_type")', pay)
         self.assertIn('row.get("answered_expense_type")', self.view)
 
     def test_nothing_re_audits_a_claim_on_save(self):

@@ -491,7 +491,8 @@ def _audit_one(row: dict[str, Any]) -> None:
             verdict.setdefault("violations", []).append({
                 "code": "group_not_set",
                 "message": ("This submitter belongs to more than one group and "
-                            "the bill does not say which. Set it before approving."),
+                            "the bill does not say which. It can be approved "
+                            "without one; it cannot be paid without one."),
                 "amount": None,
                 "blocks_automatic_decision": True,
             })

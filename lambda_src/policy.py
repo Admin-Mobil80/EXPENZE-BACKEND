@@ -386,7 +386,9 @@ def evaluate_policy(
             "code": "no_rule_for_expense_type",
             "message": (
                 f"No enabled rule covers expense type {expense_type!r}. "
-                "A reviewer must decide, or an administrator must add a rule."
+                "A reviewer can approve it anyway; it cannot be paid until "
+                "somebody sets a type the policy covers, or an administrator "
+                "adds a rule for this one."
             ),
             "amount": None,
             "blocks_automatic_decision": True,

@@ -2357,49 +2357,24 @@ def _claim_review(token: str, body: dict[str, Any], origin: str | None) -> dict[
 
     verdict = item.get("verdict") or {}
 
-    # Every approved claim carries an expense type this organisation has
-    # configured. No exceptions, and not because of anything the agent found.
+    # Approving does not require an expense type or a cost centre.
     #
-    # The check used to be "does the stored verdict block on
-    # no_rule_for_expense_type", which asked about the agent's reading rather
-    # than about the claim - so a claim whose verdict predated a rule was
-    # refused while its type was already right, and a claim tagged
-    # `not_covered` by an agent that never blocked on it could go through
-    # untagged. Either way the type is what every report groups by, and a
-    # payment filed under nothing is a line in the accounts nobody can explain.
+    # It used to require both, refusing the approval until they were set, and
+    # that put the requirement in the wrong place. Approving is a judgment
+    # about whether the company owes this money; the type and the group are
+    # about how the payment is filed, and filing is what finance does. A
+    # reviewer who has read the bill and decided it is legitimate was being
+    # stopped by two dropdowns that have nothing to do with that decision.
     #
-    # Asked of the claim as it now stands - the reviewer's answer if they gave
-    # one, the agent's reading otherwise - against the enabled types in the
-    # policy as it stands now.
-    if action == "approved":
-        chosen = str(item.get("answered_expense_type")
-                     or verdict.get("expense_type") or "")
-        known = set(policy.expense_type_ids(
-            policy.rules_for(_org_of(actor) or {})))
-        if chosen not in known:
-            return _reply(409, {
-                "error": ("Set an expense type first. Every claim is reported "
-                          "under one, so a payment cannot be approved without "
-                          "it.")
-            }, origin)
-
-    # And a claim attributed to nothing cannot be approved into one either.
+    # The requirement has not been dropped, it has moved to the moment it
+    # actually bites: `_unready_to_pay` refuses the *settlement* without both,
+    # so nothing can be paid, and therefore nothing can be reported, under a
+    # missing type or an unnamed cost centre. That is the last moment either
+    # can be asked and the first moment either matters.
     #
-    # Where the organisation runs cost centres, every payment comes out of
-    # one. The agent settles it from the bill when the bill says - a buyer's
-    # registration, a buyer's name - and where it cannot, that is frequently
-    # the whole reason the claim is in front of a person. Approving past it
-    # leaves the question that stopped the agent unanswered by the one human
-    # it was handed to, and the money leaves a budget nobody named.
-    #
-    # Checked here and not only in the console, because the console is a page
-    # somebody can have open from before this shipped.
-    if action == "approved" and ((_org_of(actor) or {}).get("groups") or []) and not str(
-            item.get("group_id") or ""):
-        return _reply(409, {
-            "error": ("Set a group first. This claim is not attributed to any "
-                      "cost centre, so there is no budget it could be paid from.")
-        }, origin)
+    # Both are still shown on the claim page, and finance can set them there
+    # or on the settlement form. What has gone is a reviewer being unable to
+    # say yes to a bill they have read.
 
     approved_total = ""
     if action == "approved":
@@ -2577,10 +2552,6 @@ def _claim_review_batch(token: str, body: dict[str, Any],
             "error": f"That is {len(ids)} claims at once. Approve at most "
                      f"{BATCH_MAX_CLAIMS} in one go."}, origin)
 
-    org = _org_of(actor) or {}
-    known = set(policy.expense_type_ids(policy.rules_for(org)))
-    has_groups = bool(org.get("groups") or [])
-
     # Everything is checked before anything is written, for the reason the
     # batch settlement is: a run that stops half way leaves some claims
     # decided and some not, and no way to see from the outside which.
@@ -2600,19 +2571,9 @@ def _claim_review_batch(token: str, body: dict[str, Any],
                 "error": f"{ref} has already been decided. Reload and try again."},
                 origin)
 
-        verdict = item.get("verdict") or {}
-        chosen = str(item.get("answered_expense_type")
-                     or verdict.get("expense_type") or "")
-        if chosen not in known:
-            return _reply(409, {
-                "error": f"{ref} has no expense type this policy covers. Open it "
-                         "and set one - every claim is reported under one."},
-                origin)
-        if has_groups and not str(item.get("group_id") or ""):
-            return _reply(409, {
-                "error": f"{ref} is not attributed to a cost centre. Open it and "
-                         "set a group - there is no budget it could be paid from."},
-                origin)
+        # No expense type or cost centre required, the same as approving one
+        # at a time. Both are asked for at settlement, which is where a claim
+        # is actually filed - see `_unready_to_pay`.
         rows.append((submission_id, item))
 
     now = int(time.time())
