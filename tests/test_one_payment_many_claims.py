@@ -303,17 +303,47 @@ class TheConsoleOffersItOnlyWhenItMeansSomething(unittest.TestCase):
         # three transfers however it is recorded.
         self.assertIn("const payees = new Set(awaiting.map(c => String(c.sub.who || \"\")));",
                       self.app)
-        self.assertIn("awaiting.length > 1 && payees.size === 1 && allReady",
+        self.assertIn("const onePayee = payees.size === 1 && awaiting.length > 1;",
                       self.app)
 
-    def test_and_only_when_every_claim_in_it_can_be_paid(self):
-        # The server refuses the whole batch and names one claim, so a button
-        # that opens a form doomed to be refused is a button that lies.
-        self.assertIn("const allReady = awaiting.every(c => !payBlocker(c.sub));",
+    def test_it_offers_what_can_be_paid_rather_than_nothing(self):
+        # It used to require the whole list to be ready, and then simply was
+        # not there - no button, no reason. Tolerable while a claim could not
+        # be approved without a type and a group; not tolerable once those
+        # became finance's to fill in. Three of twenty were ready and the
+        # control vanished without saying so.
+        self.assertIn("const ready = awaiting.filter(c => !payBlocker(c.sub));",
                       self.app)
+        self.assertIn("const held = awaiting.filter(c => payBlocker(c.sub));",
+                      self.app)
+        self.assertIn("onePayee && ready.length > 1 && can.seeQueue()", self.app)
+
+    def test_the_count_says_both_numbers(self):
+        # So "settle together" cannot be read as "settle everything of
+        # theirs" when two of seven are being left behind.
+        self.assertIn("Settle ${ready.length} of ${awaiting.length} as one payment",
+                      self.app)
+
+    def test_what_is_left_out_is_named_on_the_form(self):
+        # Finance makes one transfer and ticks a person off. If two of their
+        # seven are quietly not in it, the person is short and nothing said so.
+        fn = self.app.split("function batchForm(claims, ccy, held) {", 1)[1] \
+                     .split("\n}", 1)[0]
+        self.assertIn("Not in this payment:", fn)
+        self.assertIn("c.sub.reference || c.sub.id", fn)
+        self.assertIn("payBlocker(c.sub)", fn)
+
+    def test_and_the_absence_of_the_button_is_explained(self):
+        # A control that is simply absent is indistinguishable from one that
+        # was never built.
+        self.assertIn('const batchWhy = $("pay-batch-why");', self.app)
+        for line in ("Filter by submitter to",
+                     "Only one of these can be paid yet",
+                     "None of these can be paid yet"):
+            self.assertIn(line, self.app)
 
     def test_the_form_lists_the_claims_rather_than_counting_them(self):
-        fn = self.app.split("function batchForm(claims, ccy) {", 1)[1].split(
+        fn = self.app.split("function batchForm(claims, ccy, held) {", 1)[1].split(
             "\n}", 1)[0]
         self.assertIn("c.sub.reference || c.sub.id", fn)
         self.assertIn("fmt(c.outstanding, ccy)", fn)
@@ -321,7 +351,7 @@ class TheConsoleOffersItOnlyWhenItMeansSomething(unittest.TestCase):
     def test_the_button_says_the_figure_it_will_record(self):
         # Two identically labelled buttons a few pixels apart is how a claim
         # got settled by somebody who never saw the form.
-        fn = self.app.split("function batchForm(claims, ccy) {", 1)[1].split(
+        fn = self.app.split("function batchForm(claims, ccy, held) {", 1)[1].split(
             "\n}", 1)[0]
         self.assertIn("Record ${esc(fmt(owed, ccy))} as paid", fn)
 
@@ -453,7 +483,7 @@ class TheFloatIsOnlyOfferedToSomebodyWhoHoldsOne(unittest.TestCase):
 
     def setUp(self):
         self.app = read("../PORTAL/app.html")
-        self.fn = self.app.split("function batchForm(claims, ccy) {", 1)[1] \
+        self.fn = self.app.split("function batchForm(claims, ccy, held) {", 1)[1] \
                           .split("\n}", 1)[0]
 
     def test_it_asks_whether_they_hold_one(self):
