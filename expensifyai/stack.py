@@ -1129,6 +1129,9 @@ class ExpensifyAIStack(Stack):
         # `_claim_settle_batch`: the record stays per claim, the payment does
         # not, and the submitter hears about it once.
         claim_res.add_resource("settle-batch").add_method("POST", auth_integration)
+        # Approving several claims that were each already approvable. See
+        # `_claim_review_batch`: a convenience, not a shortcut.
+        claim_res.add_resource("review-batch").add_method("POST", auth_integration)
         claim_res.add_resource("review").add_method("POST", auth_integration)
         claim_res.add_resource("answer").add_method("POST", auth_integration)
         # A reviewer saying what an expense actually is, when nothing in the

@@ -4197,10 +4197,18 @@ class TheReviewQueueSaysWhatItIsWorth(unittest.TestCase):
         self.assertIn("tiles.hidden = !queue.length;", self.fn)
 
     def test_it_is_painted_from_the_same_list_the_queue_renders(self):
-        # Not a second filter that could drift from `isQueued`.
+        # Not a second filter that could drift from `isQueued` - and now not a
+        # second copy of the submitter filter either. `queueRows` is the one
+        # place both are applied; the tiles, the rows, the select boxes and
+        # the Approve button all read it, so the count above the list cannot
+        # describe a different set from the rows under it.
         body = self.app.split("function renderQueue() {", 1)[1].split("\n}", 1)[0]
-        self.assertIn("const queue = SUBMISSIONS.filter(isQueued);", body)
+        self.assertIn("const queue = queueRows();", body)
         self.assertIn("paintQueueTiles(queue);", body)
+        rows = self.app.split("function queueRows() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("SUBMISSIONS.filter(isQueued)", rows)
+        # Exactly one place filters the queue by submitter.
+        self.assertEqual(1, self.app.count("SUBMISSIONS.filter(isQueued).filter("))
 
 
 class EveryReportCountsOneCurrency(unittest.TestCase):
@@ -4486,13 +4494,16 @@ class SettledAndRefusedAreNotOneThing(unittest.TestCase):
 
     Whether you were paid and whether you were refused are the two things a
     person most wants told apart about their own money, and the tab that
-    grouped them answered with a word that means neither. Three tabs now:
-    Pending settlement, Settled, Rejected.
+    grouped them answered with a word that means neither. Four tabs now:
+    Pending settlement, Settled, Rejected, Withdrawn.
 
-    A withdrawn claim sits with rejected. From the claimant's side both mean
-    "no money is coming", and the row's own badge still says which of the two
-    it was - so nothing on screen claims the company refused something the
-    person took back themselves.
+    A withdrawn claim had been sitting with the rejected ones, on the
+    reasoning that from the claimant's side both mean "no money is coming".
+    True, and not the distinction that matters: one is a decision somebody
+    else made about your claim and the other is one you made yourself.
+    Looking for a receipt you took back among the ones the company refused
+    reads as being told off for it, and the count beside "Rejected" was
+    inflated by claims nobody had rejected.
     """
 
     def setUp(self):
@@ -4501,8 +4512,9 @@ class SettledAndRefusedAreNotOneThing(unittest.TestCase):
         self.sections = self.app.split("const MINE_SECTIONS = [", 1)[1].split(
             "\n];", 1)[0]
 
-    def test_the_three_tabs(self):
-        for label in ('"Pending settlement"', '"Settled"', '"Rejected"'):
+    def test_the_four_tabs(self):
+        for label in ('"Pending settlement"', '"Settled"', '"Rejected"',
+                      '"Withdrawn"'):
             self.assertIn(label, self.sections)
         self.assertNotIn('"Closed"', self.sections)
 
@@ -4511,8 +4523,11 @@ class SettledAndRefusedAreNotOneThing(unittest.TestCase):
         # under it cannot disagree about what belongs where.
         self.assertIn('(sub) => !isClosed(sub)', self.sections)
         self.assertIn('claimStage(sub).stage === "settled"', self.sections)
-        self.assertIn('["rejected", "withdrawn"].includes(claimStage(sub).stage)',
-                      self.sections)
+        self.assertIn('claimStage(sub).stage === "rejected"', self.sections)
+        self.assertIn('claimStage(sub).stage === "withdrawn"', self.sections)
+
+    def test_a_claim_you_took_back_is_not_filed_as_one_they_refused(self):
+        self.assertNotIn('["rejected", "withdrawn"].includes', self.sections)
 
     def test_the_rows_are_bucketed_by_the_same_list(self):
         body = self.app.split("function renderMine() {", 1)[1].split("\n}", 1)[0]
@@ -4545,3 +4560,53 @@ class SettledAndRefusedAreNotOneThing(unittest.TestCase):
         # Next never vanish because of a stale tab id.
         self.assertIn("|| MINE_SECTIONS[0])[2]", sibs)
 
+
+
+class OneFailedRefreshIsNotTheLastOne(unittest.TestCase):
+    """Madhusudhan settled three claims from a list of four while six waited.
+
+    `refreshNow` set `refreshing = true`, awaited three requests, and cleared
+    the flag afterwards - with nothing in between to survive a rejection. Any
+    failure in there (a dropped connection, a timed-out request, a token that
+    expired mid-flight) left the flag set for the life of the page, and the
+    first line of the function returns early while it is set. So nothing
+    refreshed again: not the poll, not the click, not the return to the tab.
+
+    The page went on working perfectly against data that had stopped arriving.
+    The figures were internally consistent and quietly out of date, and the
+    two claims he could not see were the two approved after his last
+    successful load.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as h:
+            self.app = h.read()
+        self.fn = self.app.split("async function refreshNow() {", 1)[1].split(
+            "\n}", 1)[0]
+
+    def test_the_flag_is_cleared_however_it_ends(self):
+        self.assertIn("} finally {", self.fn)
+        tail = self.fn.split("} finally {", 1)[1]
+        self.assertIn("refreshing = false;", tail)
+        self.assertIn("paintRefreshedAt();", tail)
+
+    def test_and_the_early_return_is_what_made_it_permanent(self):
+        # Worth pinning together: the guard is right, and it is only safe
+        # because the flag is now guaranteed to clear.
+        self.assertIn("if (refreshing || !sessionToken()) return;", self.fn)
+
+    def test_a_failure_is_said_rather_than_swallowed(self):
+        # A list that has stopped updating looks exactly like a quiet one.
+        self.assertIn("loadFailed = true;", self.fn)
+        self.assertIn("loadFailed = false;", self.fn)
+        paint = self.app.split("function paintRefreshedAt(", 1)[1].split("\n}", 1)[0]
+        self.assertIn('loadFailed ? "not up to date"', paint)
+
+    def test_the_warning_has_a_class_of_its_own(self):
+        # `.stale` is taken on this same button and means a newer version of
+        # the console has shipped. Two meanings on one class is how the
+        # spinner once animated the header's static glyph for ever.
+        paint = self.app.split("function paintRefreshedAt(", 1)[1].split("\n}", 1)[0]
+        self.assertIn('classList.toggle("offline"', paint)
+        self.assertIn(".btn.refresh.offline {", self.app)
+        self.assertIn(".btn.refresh.stale {", self.app)

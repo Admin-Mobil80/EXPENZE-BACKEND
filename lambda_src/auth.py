@@ -2262,6 +2262,23 @@ def _claim_review(token: str, body: dict[str, Any], origin: str | None) -> dict[
         if str(item.get("submitted_by", "")).lower() != actor.lower():
             return _reply(403, {"error": "You can only withdraw a claim you submitted."}, origin)
 
+        # And only while it is still open.
+        #
+        # A claim somebody has already refused cannot be taken back: the
+        # decision was made, under a reviewer's name, and withdrawing it
+        # afterwards rewrites the record of a refusal that happened. The
+        # console offered this - its guard named one ending and not the
+        # others - and a submitter did it, which is how it was found.
+        #
+        # Withdrawing twice is the same class of thing and is refused here
+        # too, rather than stamping a second withdrawal over the first.
+        decided = str(item.get("review_action") or "")
+        if decided:
+            return _reply(409, {
+                "error": ("This claim has already been decided and cannot be "
+                          "withdrawn. Reply to your finance team if that "
+                          "decision looks wrong.")}, origin)
+
     now = int(time.time())
     decided_by = acting.get("name") or actor
 
@@ -2490,6 +2507,123 @@ def _money_or_zero(value: Any) -> Decimal:
     except (ArithmeticError, ValueError):
         logger.warning("unreadable outcome_paid %r; treating as nothing", value)
         return Decimal(0)
+
+
+def _claim_review_batch(token: str, body: dict[str, Any],
+                        origin: str | None) -> dict[str, Any]:
+    """Approve several claims that were each already ready to be approved.
+
+    This is a convenience, not a shortcut. Every claim goes through exactly the
+    checks `_claim_review` applies to one - the same rank, the same expense
+    type against the same policy, the same group requirement - and a batch
+    containing one claim that fails any of them is refused whole, naming it.
+    Nothing here can approve something that could not have been approved on its
+    own page.
+
+    That is the whole of the design worth arguing about. A reviewer working
+    nineteen small receipts from one person should not have to open nineteen
+    pages to say yes to each; a reviewer should also never be able to say yes
+    to something the product would have stopped them saying yes to. Refusing
+    the batch rather than skipping the bad one keeps those two compatible: the
+    reviewer finds out, on the claim, why it could not go through.
+    """
+    actor = _identity_from_token(token)
+    if not actor:
+        return _reply(401, {"error": "Sign in to continue."}, origin)
+    acting = identity.resolve_by_email(actor, channel=None)
+    if not acting:
+        return _reply(403, {"error": "No membership for this account."}, origin)
+    if not may_review(acting):
+        return _reply(403, {
+            "error": "Only an owner or administrator can decide a claim."}, origin)
+
+    ids = body.get("submission_ids")
+    if not isinstance(ids, list) or not ids:
+        return _reply(400, {"error": "Say which claims are being approved."}, origin)
+    if len(ids) > BATCH_MAX_CLAIMS:
+        return _reply(400, {
+            "error": f"That is {len(ids)} claims at once. Approve at most "
+                     f"{BATCH_MAX_CLAIMS} in one go."}, origin)
+
+    org = _org_of(actor) or {}
+    known = set(policy.expense_type_ids(policy.rules_for(org)))
+    has_groups = bool(org.get("groups") or [])
+
+    # Everything is checked before anything is written, for the reason the
+    # batch settlement is: a run that stops half way leaves some claims
+    # decided and some not, and no way to see from the outside which.
+    rows = []
+    for raw in ids:
+        submission_id = str(raw or "").strip()[:80]
+        item = (_submissions.get_item(Key={"submission_id": submission_id}).get("Item")
+                if submission_id else None)
+        if not item or item.get("org_id") != acting.get("org_id"):
+            return _reply(404, {"error": f"No claim found for {submission_id}."}, origin)
+        ref = str(item.get("reference") or submission_id)
+
+        if str(item.get("outcome") or "") == "settled":
+            return _reply(409, {"error": f"{ref} has already been reimbursed."}, origin)
+        if str(item.get("review_action") or ""):
+            return _reply(409, {
+                "error": f"{ref} has already been decided. Reload and try again."},
+                origin)
+
+        verdict = item.get("verdict") or {}
+        chosen = str(item.get("answered_expense_type")
+                     or verdict.get("expense_type") or "")
+        if chosen not in known:
+            return _reply(409, {
+                "error": f"{ref} has no expense type this policy covers. Open it "
+                         "and set one - every claim is reported under one."},
+                origin)
+        if has_groups and not str(item.get("group_id") or ""):
+            return _reply(409, {
+                "error": f"{ref} is not attributed to a cost centre. Open it and "
+                         "set a group - there is no budget it could be paid from."},
+                origin)
+        rows.append((submission_id, item))
+
+    now = int(time.time())
+    approved, told = [], {"email": False, "whatsapp": False}
+    for submission_id, item in rows:
+        verdict = item.get("verdict") or {}
+        amount = str(item.get("approved_total")
+                     or verdict.get("reimbursable_total") or "0")
+        _submissions.update_item(
+            Key={"submission_id": submission_id},
+            UpdateExpression=("SET review_action = :a, review_reason = :r, "
+                              "review_by = :b, review_by_name = :bn, "
+                              "review_at = :ts, approved_total = :amt"),
+            ExpressionAttributeValues={
+                ":a": "approved", ":r": "", ":b": actor,
+                ":bn": acting.get("name") or actor, ":ts": now, ":amt": amount,
+            },
+        )
+        _logged(acting, actor, "claim approved", item,
+                amount=amount, currency=str(verdict.get("currency") or ""))
+        approved.append(submission_id)
+
+        # Told per claim, through the notice that already exists for one.
+        # A person whose nineteen receipts were approved together is hearing
+        # about nineteen decisions, not one payment - the money has not moved
+        # yet, and each claim will be paid on its own terms.
+        claimant = identity.resolve_by_email(str(item.get("submitted_by", "")),
+                                             channel=None)
+        if claimant:
+            result = notify.send("approved", claimant, {
+                "vendor": str((item.get("receipt") or {}).get("vendor") or "your claim"),
+                "currency": str(verdict.get("currency") or ""),
+                "approved": amount, "claim_ref": str(item.get("reference") or ""),
+                "settled_by": acting.get("name") or actor,
+                "approved_by": acting.get("name") or actor,
+            })
+            notify.record(_submissions, submission_id, result)
+            for channel in told:
+                told[channel] = told[channel] or bool(result.get(channel))
+
+    logger.info("%s approved %d claims in one go", actor, len(approved))
+    return _reply(200, {"status": "approved", "approved": approved,
+                        "count": len(approved), "sent": told}, origin)
 
 
 def _claim_settle_batch(token: str, body: dict[str, Any],
@@ -3727,6 +3861,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "/member/groups", "/member/transfer", "/member/reinvite", "/member",
                     "/org/budgets", "/org/rules",
                     "/claim/outcome", "/claim/settle-batch",
+                    "/claim/review-batch",
                     "/claim/review", "/claim/retype",
                     "/credits/order", "/credits/verify",
                     "/submissions", "/people", "/credits/ledger", "/apikey", "/audit",
@@ -3751,6 +3886,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _claim_retype(tok, body, origin)
         if path.endswith("/claim/review"):
             return _claim_review(tok, body, origin)
+        if path.endswith("/claim/review-batch"):
+            return _claim_review_batch(tok, body, origin)
         if path.endswith("/claim/settle-batch"):
             return _claim_settle_batch(tok, body, origin)
         if path.endswith("/claim/outcome"):
