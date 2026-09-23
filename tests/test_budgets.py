@@ -146,5 +146,56 @@ class Status(unittest.TestCase):
         self.assertEqual(budgets.status("1", "0"), "over")
 
 
+class TheFormOnlyEverShowsWhatThisScopeSet(unittest.TestCase):
+    """One budget at the top looked like a budget on everybody.
+
+    Setting the organisation's limits filled in every row of the Groups and
+    the People tabs: the figure greyed inside each empty field as its
+    placeholder, and spelled out again beside the label as "inherits
+    ₹1,00,000.00 from the organisation". Nine expense types and ten people is
+    ninety copies of a number nobody entered.
+
+    Nothing was written - `groups` and `people` are empty on the record, and
+    inheritance is computed at spend time - but a field with a number in it
+    is a field with a number in it, whatever shade it is drawn in. A budget
+    page exists to answer "what is set here", so that is the one question it
+    cannot leave ambiguous.
+
+    What covers the scope is still said, once, above the rows.
+    """
+
+    def setUp(self):
+        with open(os.path.join(os.path.dirname(__file__), "..",
+                               "..", "PORTAL", "app.html"), encoding="utf-8") as h:
+            self.app = h.read()
+
+    def test_an_empty_field_says_no_limit_not_the_figure_above_it(self):
+        self.assertIn('input.placeholder = "No limit";', self.app)
+        self.assertNotIn(
+            'input.placeholder = row.inherited != null ? (row.inherited / 100).toFixed(2)',
+            self.app)
+
+    def test_and_so_does_the_label_beside_it(self):
+        self.assertIn(
+            '(row.value == null ? `<span class="blfrom">No limit</span>` : "")',
+            self.app)
+        self.assertNotIn("inherits ${fmt(row.inherited, orgCurrency())}", self.app)
+
+    def test_what_covers_it_is_still_said_once_above_the_rows(self):
+        # Dropping the fact along with the figures would be the other error:
+        # a group with nothing of its own is still capped by the organisation,
+        # and a page that says "No limit" ten times without that sentence
+        # reads as uncapped.
+        self.assertIn("Nothing is set here. The limits above this level still ",
+                      self.app)
+        guard = self.app.split("const covered = budScope !== \"org\"", 1)[1] \
+                        .split(";", 1)[0]
+        self.assertIn("r.value == null && r.inherited != null", guard)
+
+    def test_the_organisation_tab_never_claims_to_inherit(self):
+        # It has nothing above it, so the sentence would be false there.
+        self.assertIn('const covered = budScope !== "org"', self.app)
+
+
 if __name__ == "__main__":
     unittest.main()

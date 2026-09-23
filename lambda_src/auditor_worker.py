@@ -374,12 +374,22 @@ def _audit_one(row: dict[str, Any]) -> None:
         # the way so the content hash at intake could not see it.
         shape_fp = duplicates.file_shape_key(
             org_id, row.get("receipt_name", ""), row.get("receipt_bytes"))
+        # The one with nothing read off the paper in it. Last, because it is
+        # the coarsest: where a sharper key has already matched, that is the
+        # better answer to show a reviewer.
+        repeat_fp = duplicates.repeat_key(
+            org_id, row.get("submitted_by", ""), receipt.get("vendor", ""),
+            verdict.get("receipt_total"), verdict.get("currency", ""))
 
         held = (duplicates.claim(sender_fp, submission_id) if sender_fp else None)
         if not held and fingerprint:
             held = duplicates.claim(fingerprint, submission_id)
         if not held and shape_fp:
             held = duplicates.claim(shape_fp, submission_id)
+        if not held and repeat_fp:
+            held = duplicates.claim(repeat_fp, submission_id,
+                                    days=duplicates.REPEAT_DAYS,
+                                    within=duplicates.REPEAT_WITHIN)
         # Two documents of one purchase, or two claims?
         #
         # An invoice and its receipt arrive in one email all the time - the
@@ -506,6 +516,7 @@ def _audit_one(row: dict[str, Any]) -> None:
                               "rationale = :n, currency_resolution = :c, "
                               "audited_at = :t, model = :m, fingerprint = :f, "
                               "budget_value = :bv, sender_fingerprint = :sf, "
+                              "repeat_fingerprint = :rf, "
                               "payout_value = :pv, companion_of = :co, "
                               "group_id = :g, group_status = :gs REMOVE last_error"),
             ExpressionAttributeNames={"#s": "status"},
@@ -542,6 +553,7 @@ def _audit_one(row: dict[str, Any]) -> None:
                 ":r": json.loads(json.dumps(receipt), parse_float=Decimal),
                 ":f": fingerprint,
                 ":sf": sender_fp,
+                ":rf": repeat_fp,
                 ":n": outcome["rationale"],
                 ":c": json.loads(json.dumps(outcome["currency_resolution"]), parse_float=Decimal),
                 ":t": int(time.time()),

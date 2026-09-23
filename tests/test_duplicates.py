@@ -186,6 +186,130 @@ class Releasing(unittest.TestCase):
 
 
 
+class EveryKeyWasAnExactMatchOnAStringAModelProduced(unittest.TestCase):
+    """Mobil80-Exp-67 and Exp-68: one bill, two photographs, four misses.
+
+    Reena sent the same ₹300 bill from Sinvie Book House twice, twenty-two
+    seconds apart, and nothing caught it:
+
+        bytes        70,314 against 51,986 - two photographs never match
+        name + size  same name, different length
+        invoice      `WL15089` against `WL16089`
+        sender       `2028-06-23` against `2026-09-23`, off one printed date
+
+    Four keys, four exact matches on a string read off a photograph, and the
+    model does not read the same string twice. What survived both readings was
+    who sent it, what it cost, and - through `_normalise_vendor`, which is
+    coarse on purpose - which shop. Nothing was keyed on those three together.
+
+    The cost of dropping the date is that a second genuine purchase looks the
+    same, so the key is read through a window: run over this account's whole
+    history it flags eleven pairs, every one of them a real duplicate, and
+    leaves Manoj's monthly Cursor renewal alone.
+    """
+
+    def setUp(self):
+        self.table = FakeTable("fingerprint")
+        patch = mock.patch.object(duplicates, "_table", self.table)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def key(self, vendor="SINVIE BOOK HOUSE", total="300.00", who="reena@x.com"):
+        return duplicates.repeat_key("org-1", who, vendor, total, "INR")
+
+    def test_the_pair_that_got_through_now_collides(self):
+        self.assertEqual(self.key("SINVIE BOOK HOUSE"), self.key("Sinvie Book House"))
+        self.assertTrue(self.key())
+
+    def test_it_holds_nothing_read_off_the_paper_as_an_identifier(self):
+        # Neither the date nor the invoice number, which are the two that
+        # differed between the readings.
+        self.assertNotIn("2026", self.key())
+        self.assertNotIn("15089", self.key())
+
+    def test_a_different_person_shop_amount_or_currency_is_a_different_key(self):
+        base = self.key()
+        self.assertNotEqual(base, self.key(who="manoj@x.com"))
+        self.assertNotEqual(base, self.key(vendor="Gamma"))
+        self.assertNotEqual(base, self.key(total="301.00"))
+        self.assertNotEqual(base, duplicates.repeat_key(
+            "org-1", "reena@x.com", "SINVIE BOOK HOUSE", "300.00", "USD"))
+        self.assertNotEqual(base, duplicates.repeat_key(
+            "org-2", "reena@x.com", "SINVIE BOOK HOUSE", "300.00", "INR"))
+
+    def test_a_claim_missing_any_of_the_four_has_no_key(self):
+        self.assertEqual("", duplicates.repeat_key("org-1", "", "Sinvie", "300.00", "INR"))
+        self.assertEqual("", duplicates.repeat_key("org-1", "a@x.com", "", "300.00", "INR"))
+        self.assertEqual("", duplicates.repeat_key("org-1", "a@x.com", "Sinvie", "", "INR"))
+        self.assertEqual("", duplicates.repeat_key("org-1", "a@x.com", "Sinvie", "300.00", ""))
+
+    def test_a_resend_minutes_later_is_caught(self):
+        k = self.key()
+        self.assertIsNone(duplicates.claim(k, "sub-67", within=duplicates.REPEAT_WITHIN))
+        self.assertEqual("sub-67",
+                         duplicates.claim(k, "sub-68", within=duplicates.REPEAT_WITHIN))
+
+    def test_a_subscription_renewing_a_month_later_is_not(self):
+        # Manoj's Cursor invoices, `-0004` then `-0005`. One character apart,
+        # exactly like the Sinvie pair - which is why no sharper key could
+        # separate them and why the window has to.
+        k = self.key(vendor="Cursor", total="20.00", who="manoj@x.com")
+        duplicates.claim(k, "sub-1", within=duplicates.REPEAT_WITHIN)
+        self.table.rows[k]["created_at"] -= duplicates.REPEAT_WITHIN + 60
+        self.assertIsNone(duplicates.claim(k, "sub-16", within=duplicates.REPEAT_WITHIN))
+
+    def test_and_the_later_one_takes_the_key_over(self):
+        # Otherwise the window is measured from whichever claim got there
+        # first, and a resend of *this* month's invoice would be compared
+        # against last month's.
+        k = self.key(vendor="Cursor", total="20.00", who="manoj@x.com")
+        duplicates.claim(k, "sub-1", within=duplicates.REPEAT_WITHIN)
+        self.table.rows[k]["created_at"] -= duplicates.REPEAT_WITHIN + 60
+        duplicates.claim(k, "sub-16", within=duplicates.REPEAT_WITHIN)
+        self.assertEqual("sub-16", self.table.rows[k]["submission_id"])
+        self.assertEqual("sub-16",
+                         duplicates.claim(k, "sub-17", within=duplicates.REPEAT_WITHIN))
+
+    def test_the_window_is_only_asked_for_where_it_is_passed(self):
+        # Every other key means the same thing a year later.
+        k = duplicates.invoice_key("org-1", "Cafe", "INV-1001")
+        duplicates.claim(k, "sub-1")
+        self.table.rows[k]["created_at"] -= 400 * 86400
+        self.assertEqual("sub-1", duplicates.claim(k, "sub-2"))
+
+    def test_the_row_is_not_kept_longer_than_the_window_reads_it(self):
+        k = self.key()
+        duplicates.claim(k, "sub-67", days=duplicates.REPEAT_DAYS,
+                         within=duplicates.REPEAT_WITHIN)
+        row = self.table.rows[k]
+        self.assertEqual(duplicates.REPEAT_DAYS * 86400,
+                         row["expires_at"] - row["created_at"])
+        self.assertGreater(duplicates.REPEAT_DAYS * 86400, duplicates.REPEAT_WITHIN)
+
+    def test_it_is_claimed_last_of_the_five(self):
+        # It is the coarsest, so where a sharper key has already matched, that
+        # is the better answer to put in front of a reviewer.
+        with open(os.path.join(ROOT, "lambda_src", "auditor_worker.py"),
+                  encoding="utf-8") as handle:
+            worker = handle.read()
+        order = [worker.index(f"duplicates.claim({fp}") for fp in
+                 ("sender_fp", "fingerprint", "shape_fp", "repeat_fp")]
+        self.assertEqual(order, sorted(order))
+
+    def test_a_rejected_claim_gives_it_back_like_the_others(self):
+        # The bug the release exists to prevent, one key later: a claim that
+        # was refused must not tell the honest resend it is a duplicate of
+        # something that went nowhere.
+        src = open(os.path.join(ROOT, "lambda_src", "duplicates.py"),
+                   encoding="utf-8").read()
+        body = src.split("def release_all(", 1)[1]
+        self.assertIn('item.get("repeat_fingerprint")', body)
+        worker = open(os.path.join(ROOT, "lambda_src", "auditor_worker.py"),
+                      encoding="utf-8").read()
+        self.assertIn("repeat_fingerprint = :rf", worker)
+        self.assertIn('":rf": repeat_fp,', worker)
+
+
 class OneNumberReadTwoWays(unittest.TestCase):
     """An invoice and its own payment receipt, linked by the only thing they share.
 

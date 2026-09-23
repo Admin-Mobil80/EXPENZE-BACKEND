@@ -64,6 +64,24 @@ FINGERPRINTS_TABLE = os.environ.get("FINGERPRINTS_TABLE", "")
 # that never expire are a table that only grows.
 RETENTION_DAYS = 400
 
+# `repeat_key` has no date and no identifier in it, so on its own it cannot
+# tell a bill sent twice from the same thing bought twice. What separates them
+# is when the second one arrived.
+#
+# Every genuine pair on this account arrived inside twelve minutes - somebody
+# photographs a bill, nothing visibly happens, they send it again. Against
+# that: Manoj's Cursor subscription, $20 from the same vendor to the same
+# person every month, where the two claims landed forty-two hours apart
+# because one was submitted late. A day is comfortably longer than every
+# resend and comfortably shorter than that, and a control that cries wolf on
+# every subscription renewal is one people learn to dismiss - and then it is
+# worth nothing on the day it is right.
+REPEAT_WITHIN = 24 * 3600
+
+# The row itself is kept a little longer than the window it is read through,
+# and no longer: outside the window it answers nothing.
+REPEAT_DAYS = 2
+
 _table = boto3.resource("dynamodb").Table(FINGERPRINTS_TABLE) if FINGERPRINTS_TABLE else None
 
 _PUNCT = re.compile(r"[^a-z0-9]+")
@@ -213,6 +231,54 @@ def submitter_key(org_id: str, submitted_by: str, date: str,
     return f"{org_id}#sender#{who}#{day}#{ccy}#{amount}"
 
 
+def repeat_key(org_id: str, submitted_by: str, vendor: str,
+               total: Any, currency: str) -> str:
+    """The same person, the same shop, the same money — and no date.
+
+    Mobil80-Exp-67 and Exp-68 are two photographs of one bill from Sinvie Book
+    House for ₹300, sent by one person twenty-two seconds apart, and all four
+    keys missed them:
+
+      bytes        two photographs are never the same bytes
+      name + size  70,314 against 51,986
+      invoice      `WL15089` against `WL16089` — one character, read twice
+      sender       `2028-06-23` against `2026-09-23` — the printed date, read
+                   twice, two years apart
+
+    The pattern is the whole point. Every key above is an exact match on a
+    string a model produced from a photograph, and the model does not produce
+    the same string twice. The two facts that *did* survive both readings are
+    the two nothing was keyed on together: who sent it, and what it cost.
+
+    So this is those two, plus the vendor at the coarseness `_normalise_vendor`
+    already proved holds up - "SINVIE BOOK HOUSE" and "Sinvie Book House" are
+    both `sinvie`, as "Cursor" and "Cursor (Anysphere Inc.)" are both `cursor`.
+    Nothing in it is an identifier read off the paper.
+
+    Dropping the date is what makes it work and what makes it coarse. One
+    person buying the same thing at the same shop for the same price on two
+    different days would otherwise be flagged, and that is a real thing that
+    happens - a daily canteen run, a monthly subscription. Run over this
+    account's history the key finds every known duplicate and exactly one
+    pair that is not: Manoj's Cursor renewals, $20 a month, invoice `-0004`
+    then `-0005`. The answer is not a sharper key, because sharper is what
+    just failed - those two invoice numbers differ by one character, the same
+    as `WL15089` and `WL16089`. It is `REPEAT_WITHIN`: the renewals arrived
+    forty-two hours apart and every genuine resend arrived inside twelve
+    minutes, so *when* is what tells them apart.
+
+    And a flag is a glance at two receipts. It blocks automatic settlement and
+    asks a person; it never refuses a claim.
+    """
+    who = str(submitted_by or "").strip().lower()
+    shop = _normalise_vendor(vendor)
+    amount = _normalise_amount(total)
+    ccy = str(currency or "").strip().upper()
+    if not (who and shop and amount and ccy):
+        return ""
+    return f"{org_id}#repeat#{who}#{shop}#{ccy}#{amount}"
+
+
 def file_shape_key(org_id: str, filename: str, size: Any) -> str:
     """The same attachment, arriving twice by different routes.
 
@@ -240,7 +306,8 @@ def file_shape_key(org_id: str, filename: str, size: Any) -> str:
     return f"{org_id}#shape#{name}#{length}"
 
 
-def claim(key: str, submission_id: str) -> Optional[str]:
+def claim(key: str, submission_id: str, days: int = RETENTION_DAYS,
+          within: int = 0) -> Optional[str]:
     """Take ownership of a fingerprint.
 
     Returns None when this submission is the first to claim it, or the id of
@@ -249,15 +316,33 @@ def claim(key: str, submission_id: str) -> Optional[str]:
     A conditional write rather than read-then-write: two receipts arriving
     together would otherwise both read "nothing here" and both conclude they
     were the original.
+
+    `days` is how long the row is worth keeping, and it is not the same answer
+    for every key. A key built on an invoice number identifies one bill for as
+    long as the paperwork is kept; `repeat_key` identifies a shop and a price.
+
+    `within` is how recent the existing claim has to be for a match to mean
+    anything, in seconds, and only `repeat_key` passes one. An older claim is
+    not a duplicate and not an obstacle: this submission takes the key over, so
+    the next arrival is measured against the most recent claim rather than
+    against whichever one happened to get there first. TTL could not do this
+    job - DynamoDB deletes expired rows when it gets round to it, which is up
+    to two days late, and "is this within a day" is not a question to answer
+    with a best-effort sweep.
     """
     if _table is None or not key or not submission_id:
         return None
     now = int(time.time())
+    def _take():
+        _table.put_item(
+            Item={"fingerprint": key, "submission_id": submission_id,
+                  "created_at": now,
+                  "expires_at": now + max(1, int(days)) * 86400})
     try:
         _table.put_item(
             Item={"fingerprint": key, "submission_id": submission_id,
                   "created_at": now,
-                  "expires_at": now + RETENTION_DAYS * 86400},
+                  "expires_at": now + max(1, int(days)) * 86400},
             ConditionExpression="attribute_not_exists(fingerprint)",
         )
         return None
@@ -268,6 +353,16 @@ def claim(key: str, submission_id: str) -> Optional[str]:
         # proves nothing, so let this one through rather than accuse it.
         if not owner or owner == submission_id:
             return None
+        if within:
+            try:
+                age = now - int(row.get("created_at") or 0)
+            except (TypeError, ValueError):
+                age = 0
+            if age > int(within):
+                logger.info("fingerprint held by %s but %ds old - taking it over",
+                            owner, age)
+                _take()
+                return None
         logger.info("fingerprint already held by %s", owner)
         return owner
     except Exception:
@@ -300,7 +395,7 @@ def release(key: str, submission_id: str) -> None:
 def release_all(item: dict) -> int:
     """Give back every fingerprint a claim is holding. Returns how many went.
 
-    A claim takes out **four** fingerprints, and letting go of two of them is
+    A claim takes out **five** fingerprints, and letting go of four of them is
     the same as letting go of none.
 
     A DTDC bill for INR 1,400 was rejected, the submitter photographed it again
@@ -334,6 +429,11 @@ def release_all(item: dict) -> int:
     keys = [
         str(item.get("fingerprint") or ""),
         str(item.get("sender_fingerprint") or ""),
+        # Stored rather than rebuilt, like the two above it: the amount it was
+        # keyed on is the verdict's total at the time it was audited, and a
+        # claim re-read under a corrected currency would rebuild a key it never
+        # held while the one it did hold stayed claimed for a month.
+        str(item.get("repeat_fingerprint") or ""),
         file_key(org_id, sha) if (org_id and sha) else "",
         file_shape_key(org_id, str(item.get("receipt_name") or ""),
                        item.get("receipt_bytes")) if org_id else "",
