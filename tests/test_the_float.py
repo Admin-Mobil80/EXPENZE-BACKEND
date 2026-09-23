@@ -499,18 +499,31 @@ class TheHolderCanSeeTheirOwnFloat(unittest.TestCase):
         mine = self.app.split("function isMine(sub) {", 1)[1].split("\n}", 1)[0]
         self.assertIn("LIVE && LIVE.email", mine)
 
-    def test_the_tab_is_drawn_only_for_somebody_who_holds_one(self):
-        # Thirty-seven people here have never been handed cash, and a
-        # permanently empty tab is a question they open once to find has no
-        # answer.
-        self.assertIn('if (id === "float" && !myFloat()) return;', self.app)
+    def test_the_tab_is_drawn_for_everybody(self):
+        """It appeared only for holders, and that was the wrong trade.
 
-    def test_and_it_falls_back_when_the_float_is_closed(self):
-        # Otherwise a reader standing on the tab gets the claims table with
-        # nothing in it and an empty-state sentence about claims they never
-        # filed.
-        self.assertIn('if (mineSection === "float" && !myFloat()) mineSection = "pending";',
-                      self.app)
+        The argument for hiding it was sound - a permanently empty tab is a
+        question somebody opens once to find has no answer - and the cost was
+        higher: a tab that is sometimes there is a tab nobody learns they
+        have, and the first person handed cash has no way of knowing where to
+        look for it.
+        """
+        self.assertNotIn('if (id === "float" && !myFloat()) return;', self.app)
+
+    def test_and_says_so_when_there_is_no_advance(self):
+        # Three dashes over an empty table reads as a fault. "No advance has
+        # been made to you" is a complete answer.
+        fn = self.app.split("function renderMyFloat() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("No advance has been made to you.", fn)
+        self.assertIn("if you need one, ask them.", fn)
+
+    def test_the_panel_follows_the_tab_rather_than_the_holding(self):
+        # It hid itself when there was no float, which is how a tab that is
+        # always there would have shown the claims table underneath it.
+        fn = self.app.split("function renderMyFloat() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('box.hidden = mineSection !== "float";', fn)
+        body = self.app.split("function renderMine() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('const onFloat = mineSection === "float";', body)
 
     def test_it_carries_no_count_badge(self):
         # A balance is not a number of things.

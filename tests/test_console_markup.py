@@ -4555,7 +4555,9 @@ class SettledAndRefusedAreNotOneThing(unittest.TestCase):
         sections = self.app.split("const MINE_SECTIONS = [", 1)[1].split("\n];", 1)[0]
         self.assertIn('["float", "Advance", null]', sections)
         body = self.app.split("function renderMine() {", 1)[1].split("\n}", 1)[0]
-        self.assertIn('const onFloat = mineSection === "float" && myFloat();', body)
+        # The tab is drawn for everybody now, so which panel is shown follows
+        # the tab rather than whether the reader happens to hold a float.
+        self.assertIn('const onFloat = mineSection === "float";', body)
 
     def test_the_finished_tabs_are_badged_quietly(self):
         # The red badge is for work somebody still has to do. A count of
