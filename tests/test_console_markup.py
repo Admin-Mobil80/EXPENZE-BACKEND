@@ -424,6 +424,43 @@ class AClaimHasItsOwnPage(unittest.TestCase):
         self.assertNotIn('goTo("queue", row.dataset.claim)', self.source)
 
 
+class MyExpensesOpensOnWhatItIsFor(unittest.TestCase):
+    """Eleven budget tiles, ten of them zero, above the page's actual job.
+
+    My expenses opened on a wall of them - one per configured expense type -
+    and one person does not spend under every category a company runs, so ten
+    of the eleven read ₹0.00 against a limit. The first screen of the product
+    was mostly zeroes, and the two rows that were not zeroes answered a
+    question nobody had opened this page to ask.
+
+    Nothing there could be acted on either. Going over a budget has never
+    blocked a receipt and never will; finance is told. So it pushed the thing
+    a submitter *can* do - send a receipt, see what happened to the ones they
+    sent - below the fold, for information they could not use.
+
+    The figures are still kept and still reported. They are on the Budgets
+    page, where somebody whose job is watching them goes to look.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as h:
+            self.app = h.read()
+
+    def test_the_tiles_are_gone_markup_styles_and_renderer(self):
+        for gone in ('id="my-budget"', "renderMyBudget", ".mybud"):
+            self.assertNotIn(gone, self.app, gone)
+
+    def test_the_page_opens_on_the_receipts(self):
+        mine = self.app.split('else if (view === "mine") {', 1)[1].split("}", 1)[0]
+        self.assertIn("renderMine();", mine)
+
+    def test_the_figures_are_still_worked_out_for_the_budgets_page(self):
+        # `budgetLines` is what fills the "used" column beside each limit.
+        self.assertIn("function budgetLines(person) {", self.app)
+        editor = self.app.split("// ---- editor ----", 1)[1]
+        self.assertIn("const spend = person ? budgetLines(person) : null;", editor)
+
+
 class MyExpensesLeadsSomewhere(unittest.TestCase):
     """Your own claims open, and you can take one back.
 

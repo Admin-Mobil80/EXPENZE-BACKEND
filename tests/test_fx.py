@@ -199,14 +199,22 @@ class TheConsoleCountsConvertedSpend(unittest.TestCase):
         lines = self.app.split("function budgetLines(", 1)[1].split("\nfunction ", 1)[0]
         self.assertIn("converted === null", lines)
 
-    def test_the_person_is_told_their_claim_was_converted(self):
-        # assertIn would print the whole console on a failure.
-        for phrase in ("converted to ${b.ccy}", "you are reimbursed in the "):
+    def test_the_conversion_is_admitted_where_the_figure_is_read(self):
+        # It used to be said under the budget tiles above My expenses. Those
+        # are gone - eleven of them, ten reading zero, above the thing that
+        # page is for - and the converted figure they explained now appears
+        # only in the Budgets editor's "used" column, so the caveat moved with
+        # it. assertIn would print the whole console on a failure.
+        for phrase in ("converted to `", "reimbursed in the currency spent"):
             self.assertTrue(phrase in self.app, f"the budget note lost {phrase!r}")
 
     def test_what_could_not_be_converted_is_still_named(self):
-        self.assertTrue("not be converted" in self.app,
+        self.assertTrue("could not be converted, so " in self.app,
                         "nothing tells the reader a claim was left out")
+
+    def test_it_is_only_said_when_it_happened(self):
+        # On an account billing in one currency it is noise.
+        self.assertIn("if (spend && (spend.converted || spend.other)) {", self.app)
 
 
 if __name__ == "__main__":
