@@ -464,6 +464,41 @@ class TheHolderCanSeeTheirOwnFloat(unittest.TestCase):
         fn = self.app.split("async function loadAdvances() {", 1)[1].split("\n}", 1)[0]
         self.assertNotIn("if (!can.seeQueue()) return;", fn)
 
+    def test_it_asks_who_the_reader_is_the_way_the_rest_of_the_page_does(self):
+        """It asked `currentUser.email`, which does not exist.
+
+        That object carries an id, a name, a role, initials and a tier, and
+        never an address - so the lookup compared undefined against every
+        holder, found nobody, and the tab appeared for no one at all. Not for
+        the one person on the account who holds a float, and not for an owner
+        who had just recorded an advance to himself in order to go and look at
+        it.
+
+        `LIVE.email` is how `isMine` answers the same question, and the
+        WhatsApp prompt key, and the People list when it marks a row as you.
+
+        The browser check that "proved" this working set `currentUser.email`
+        in its own fixture: it tested a shape the product does not produce,
+        which is worse than not testing it. This reads the real object's
+        fields out of the file instead.
+        """
+        fn = self.app.split("function myFloat() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("(LIVE && LIVE.email)", fn)
+        code = "\n".join(l for l in fn.splitlines()
+                         if not l.strip().startswith(("*", "/*", "//")))
+        self.assertNotIn("currentUser.email", code)
+
+        # And the field really is absent from that object, which is the fact
+        # the whole bug rests on.
+        built = self.app.split("currentUser = {", 1)[1].split("};", 1)[0]
+        self.assertNotIn("email", built)
+
+    def test_and_the_same_source_as_is_mine(self):
+        # Two answers to "which of these is me" is how one of them goes
+        # quietly wrong.
+        mine = self.app.split("function isMine(sub) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("LIVE && LIVE.email", mine)
+
     def test_the_tab_is_drawn_only_for_somebody_who_holds_one(self):
         # Thirty-seven people here have never been handed cash, and a
         # permanently empty tab is a question they open once to find has no
