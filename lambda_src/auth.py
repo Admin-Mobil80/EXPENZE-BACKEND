@@ -932,8 +932,27 @@ def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict
             who = holders.get(email)
             if who is None:
                 continue
-            # Withdrawn claims never happened.
-            if str(claim.get("review_action") or "") == "withdrawn":
+            # Three kinds of claim are nothing to do with this float, and
+            # all three were being counted as money spent out of it.
+            #
+            # Withdrawn: never happened.
+            #
+            # Rejected: refused. The company is not going to account for it,
+            # out of the float or otherwise, so holding it against the balance
+            # says somebody is carrying a debt that was cancelled. Riyad had
+            # five old refusals showing as 2,500 still in flight.
+            #
+            # A companion: the second document of one purchase - an invoice
+            # and its receipt arriving together - which is evidence for a
+            # claim and not a claim. Counting it adds the same money twice:
+            # Mobil80-Exp-18 was settled for 8,819.23 and Mobil80-Exp-19, its
+            # companion, was counted again as unsettled. The console's
+            # `payableClaims` has always known this ("a second document of a
+            # claim is not a second thing to pay") and this had not been told.
+            action = str(claim.get("review_action") or "")
+            if action in ("withdrawn", "rejected"):
+                continue
+            if str(claim.get("companion_of") or ""):
                 continue
             settled = str(claim.get("outcome") or "") == "settled"
             if settled and str(claim.get("outcome_source") or "") == "float":

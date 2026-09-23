@@ -92,11 +92,45 @@ class TheFloatIsDrawnDownByWhatIsSettledAgainstIt(unittest.TestCase):
         self.assertEqual((Decimal("10000"), Decimal("10000")),
                          out_and_hand(advanced=20000, returned=10000))
 
-    def test_a_withdrawn_claim_never_counts(self):
+    def test_a_withdrawn_or_refused_claim_never_counts(self):
+        """Three kinds of claim are nothing to do with a float.
+
+        Withdrawn never happened. Rejected was refused - the company is not
+        going to account for it, out of the float or otherwise, so holding it
+        against the balance says somebody is carrying a debt that was
+        cancelled. Riyad had five old refusals showing as 2,500 still in
+        flight against an advance he had already handed back.
+        """
         view = read("lambda_src/auth.py").split("def _advances_view(", 1)[1].split(
             "\ndef ", 1)[0]
-        self.assertIn('if str(claim.get("review_action") or "") == "withdrawn":',
-                      view)
+        self.assertIn('if action in ("withdrawn", "rejected"):', view)
+
+    def test_nor_does_the_second_document_of_one_purchase(self):
+        """An invoice and its receipt arriving together is one spend.
+
+        Mobil80-Exp-18 was settled for 8,819.23 and Mobil80-Exp-19, its
+        companion, was counted again as unsettled - the same money, twice, on
+        a balance whose whole job is to be arithmetic somebody can check.
+
+        The console's `payableClaims` has always known this. The float
+        arithmetic had not been told.
+        """
+        view = read("lambda_src/auth.py").split("def _advances_view(", 1)[1].split(
+            "\ndef ", 1)[0]
+        self.assertIn('if str(claim.get("companion_of") or ""):', view)
+        app = read("../PORTAL/app.html")
+        payable = app.split("function payableClaims(", 1)[1].split("\nfunction ", 1)[0]
+        self.assertIn("if (isCompanion(sub)) return;", payable)
+
+    def test_the_exclusions_come_before_any_of_the_three_totals(self):
+        # Otherwise one of them picks the claim up on the way past.
+        view = read("lambda_src/auth.py").split("def _advances_view(", 1)[1].split(
+            "\ndef ", 1)[0]
+        loop = view.split("for claim in _submissions_tbl_scan(org_id):", 1)[1]
+        self.assertLess(loop.index('if str(claim.get("companion_of") or ""):'),
+                        loop.index('who["from_float"]'))
+        self.assertLess(loop.index('if action in ("withdrawn", "rejected"):'),
+                        loop.index('who["pending"]'))
 
 
 class ABillTooLargeForTheFloat(unittest.TestCase):
