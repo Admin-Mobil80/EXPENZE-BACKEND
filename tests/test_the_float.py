@@ -210,9 +210,32 @@ class OnlyTheRightPeopleAndTheRightAmounts(unittest.TestCase):
         # record money leaving the company.
         self.assertIn("if not runs_the_org(acting):", self.fn)
 
-    def test_so_is_reading_it(self):
+    def test_reading_somebody_else_s_is_gated_the_same_way(self):
         # A float balance is a statement about a colleague's cash.
-        self.assertIn("if not runs_the_org(acting):", self.view)
+        self.assertIn("mine_only = not runs_the_org(acting)", self.view)
+        self.assertIn('people = [p for p in people if str(p["email"]).lower() == me]',
+                      self.view)
+
+    def test_but_anybody_may_see_their_own(self):
+        # Somebody carrying the company's cash is accountable for it, and the
+        # only place that balance existed was a screen they could not open -
+        # so they were keeping a running total in their head against a ledger
+        # held by somebody else, and heard about a disagreement by being asked
+        # about it.
+        self.assertNotIn("Only an owner, administrator or finance executive can see",
+                         self.view)
+
+    def test_the_movements_are_narrowed_with_the_balance(self):
+        # A balance with somebody else's transactions under it would be worse
+        # than either on its own.
+        self.assertIn('rows = [r for r in rows if str(r.get("holder") or "").lower() == me]',
+                      self.view)
+
+    def test_both_readers_are_answered_by_the_same_arithmetic(self):
+        # Narrowed at the end rather than by a second endpoint, which would be
+        # a second place for the sums to be got subtly differently.
+        self.assertLess(self.view.index("people.sort("),
+                        self.view.index("if mine_only:"))
 
     def test_the_holder_must_be_in_this_organisation(self):
         self.assertIn('str(holder.get("org_id") or "") != org_id', self.fn)
@@ -416,3 +439,73 @@ class AFloatSettlementIsNotAPayment(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheHolderCanSeeTheirOwnFloat(unittest.TestCase):
+    """Somebody carrying the company's cash could not see how much of it.
+
+    The balance existed on one screen, and it was a screen they could not
+    open: reading the float was gated like recording one, on the reasoning
+    that a float balance is a statement about a colleague's cash. True of
+    somebody else's. Their own is a statement about what they are personally
+    accountable for, and they were being asked to keep the running total in
+    their head against a ledger held by somebody else - so the first they
+    heard of a disagreement was being asked about it.
+    """
+
+    def setUp(self):
+        self.auth = read("lambda_src/auth.py")
+        self.view = self.auth.split("def _advances_view(", 1)[1].split("\ndef ", 1)[0]
+        self.app = read("../PORTAL/app.html")
+
+    def test_the_console_fetches_it_for_everybody(self):
+        # Not fetching it was the only reason a submitter could not be shown
+        # it; the endpoint had already narrowed.
+        fn = self.app.split("async function loadAdvances() {", 1)[1].split("\n}", 1)[0]
+        self.assertNotIn("if (!can.seeQueue()) return;", fn)
+
+    def test_the_tab_is_drawn_only_for_somebody_who_holds_one(self):
+        # Thirty-seven people here have never been handed cash, and a
+        # permanently empty tab is a question they open once to find has no
+        # answer.
+        self.assertIn('if (id === "float" && !myFloat()) return;', self.app)
+
+    def test_and_it_falls_back_when_the_float_is_closed(self):
+        # Otherwise a reader standing on the tab gets the claims table with
+        # nothing in it and an empty-state sentence about claims they never
+        # filed.
+        self.assertIn('if (mineSection === "float" && !myFloat()) mineSection = "pending";',
+                      self.app)
+
+    def test_it_carries_no_count_badge(self):
+        # A balance is not a number of things.
+        tabs = self.app.split("function renderMineTabs(buckets) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn('if (id === "float") return;', tabs)
+
+    def test_the_three_figures_are_the_ones_finance_sees(self):
+        fn = self.app.split("function renderMyFloat() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("advMinor(held.held)", fn)
+        self.assertIn("advMinor(held.pending)", fn)
+        self.assertIn("advMinor(held.in_hand)", fn)
+
+    def test_and_the_colours_mean_the_same_thing(self):
+        # A negative `in hand` is frequently a large bill somebody paid
+        # personally and is waiting to hear about; a negative `still out`
+        # means more of the company's money has gone than was given.
+        fn = self.app.split("function renderMyFloat() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('inHand < 0 ? "var(--warn)"', fn)
+        self.assertIn('stillOut < 0 ? "var(--bad)"', fn)
+
+    def test_the_note_explains_the_gap_rather_than_leaving_it(self):
+        # "Still out 7,089 / in hand 457" invites the question this answers.
+        fn = self.app.split("function renderMyFloat() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("spent but not yet settled", fn)
+        self.assertIn("More has been settled against your float than was advanced",
+                      fn)
+
+    def test_the_ledger_is_the_movements_not_a_summary(self):
+        fn = self.app.split("function renderMyFloat() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("ADVANCES.movements", fn)
+        for field in ("m.mode", "m.reference", "m.by", "m.note"):
+            self.assertIn(field, fn)

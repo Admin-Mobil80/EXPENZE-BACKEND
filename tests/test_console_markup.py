@@ -4545,9 +4545,17 @@ class SettledAndRefusedAreNotOneThing(unittest.TestCase):
 
     def test_the_rows_are_bucketed_by_the_same_list(self):
         body = self.app.split("function renderMine() {", 1)[1].split("\n}", 1)[0]
-        self.assertIn("MINE_SECTIONS.forEach(([id, , holds]) => { buckets[id] = mine.filter(holds); });",
-                      body)
+        self.assertIn("buckets[id] = holds ? mine.filter(holds) : [];", body)
         self.assertIn("const shown = buckets[mineSection] || buckets.pending;", body)
+
+    def test_the_float_tab_carries_no_predicate(self):
+        # It is not a bucket of claims. It shows what the company has advanced
+        # the reader and the ledger behind it, which is why the entry has no
+        # filter and `renderMine` draws it instead of the table.
+        sections = self.app.split("const MINE_SECTIONS = [", 1)[1].split("\n];", 1)[0]
+        self.assertIn('["float", "Advance", null]', sections)
+        body = self.app.split("function renderMine() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('const onFloat = mineSection === "float" && myFloat();', body)
 
     def test_the_finished_tabs_are_badged_quietly(self):
         # The red badge is for work somebody still has to do. A count of

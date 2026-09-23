@@ -855,11 +855,16 @@ def _advance_record(token: str, body: dict[str, Any], origin: str | None) -> dic
 
 
 def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
-    """Every float holder, what they hold, and the movements behind it.
+    """Float holders, what they hold, and the movements behind it.
 
     The three components are returned separately and the balance with them.
     Finance does not have to take one number on trust, and when it looks wrong
     they can see which of the three is the surprise without opening a ledger.
+
+    Everybody above staff sees every holder. A submitter sees themselves and
+    nobody else - the same figures, the same movements, narrowed on the way
+    out - because somebody carrying the company's cash is accountable for it
+    and was being asked to keep the running total in their head.
     """
     actor = _identity_from_token(token)
     if not actor:
@@ -867,11 +872,22 @@ def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict
     acting = identity.resolve_by_email(actor, channel=None)
     if not acting:
         return _reply(403, {"error": "No membership for this account."}, origin)
-    if not runs_the_org(acting):
-        return _reply(403, {
-            "error": "Only an owner, administrator or finance executive can see "
-                     "the float."}, origin)
+    # Anybody may see their own float; only finance sees everybody's.
+    #
+    # Somebody carrying the company's cash is accountable for it, and until
+    # now the only place that balance existed was a screen they could not
+    # open. They were being asked to keep a running total in their head
+    # against a ledger held by somebody else - and the first they heard of a
+    # disagreement was being asked about it.
+    #
+    # The scoping is done on the way out rather than by a second endpoint:
+    # one query, one shape, and the console renders the same components for
+    # both readers. A second endpoint is a second place for the arithmetic to
+    # be got subtly differently.
+    mine_only = not runs_the_org(acting)
+    me = str(acting.get("email") or actor).lower()
 
+    org = _org_of(actor) or {}
     org = _org_of(actor) or {}
     org_id = str(org.get("org_id") or acting.get("org_id") or "")
     base = money.default_for_org(org)
@@ -956,8 +972,16 @@ def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict
         })
     people.sort(key=lambda p: _as_decimal(p["held"]))
 
+    # Narrowed here, at the end, so both readers are answered by the same
+    # arithmetic. A submitter sees one holder - themselves - or none, which
+    # is the honest answer for somebody who has never been given an advance.
+    if mine_only:
+        people = [p for p in people if str(p["email"]).lower() == me]
+        rows = [r for r in rows if str(r.get("holder") or "").lower() == me]
+
     return _reply(200, {
         "currency": base,
+        "mine_only": mine_only,
         "holders": people,
         "movements": [{
             "ts": int(r.get("ts") or 0),
