@@ -666,8 +666,23 @@ class ReviewingIsAScreenNotARole(unittest.TestCase):
         self.assertIn("isMine(sub)", guard)
         self.assertIn("!mayReview", guard)
 
-    def test_a_claim_waiting_on_you_says_so_rather_than_blaming_finance(self):
-        self.assertIn("Waiting on your answer above.", self.source)
+    def test_nothing_is_ever_waiting_on_the_submitter(self):
+        """This branch had a third arm, and the variable it read was gone.
+
+        "Waiting on your answer above" dates from when the product put
+        questions to submitters - a headcount, a cost centre. That was removed
+        deliberately: what the agent cannot settle goes to a reviewer, and
+        what a reviewer cannot settle they decide. The variable went with it
+        and the branch reading it stayed, so every non-reviewer opening an
+        undecided claim hit a ReferenceError that stopped `renderDetail` where
+        it stood - no payment controls, no receipt pane, nothing below that
+        line. It hid for months because the two branches above catch the
+        common cases.
+        """
+        self.assertNotIn("Waiting on your answer above.", self.source)
+        # The variable, not the word: "asking" appears in ordinary prose in
+        # the comments around here.
+        self.assertNotIn("s2.textContent = asking", self.source)
 
     def test_a_finance_executive_is_told_why_they_cannot_act(self):
         # "You will hear the outcome by email and WhatsApp" is the submitter's
