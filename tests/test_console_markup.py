@@ -2850,11 +2850,10 @@ class ASettledClaimIsDeadInEveryControl(unittest.TestCase):
     def test_the_four_controls_are_assigned_exactly_once(self):
         # The regression was a second assignment, so what is pinned is that
         # there is no second one - not the wording of any particular guard.
-        self.assertEqual(1, self.detail.count(
-            '["headcount", "src", "ccy", "claim-group"].forEach'),
-            "a second pass assigns to these controls again")
-        self.assertEqual(1, self.detail.count('["etype"].forEach'),
-                         "a second pass assigns to the expense type again")
+        self.assertEqual(1, self.detail.count('["headcount", "src", "ccy"].forEach'),
+                         "a second pass assigns to these controls again")
+        self.assertEqual(1, self.detail.count('["etype", "claim-group"].forEach'),
+                         "a second pass assigns to those two again")
         self.assertEqual(1, self.detail.count("if (el) el.disabled = frozen;"))
         self.assertEqual(1, self.detail.count("if (el) el.disabled = classFrozen;"))
         self.assertNotIn("el.disabled = unread", self.detail)
@@ -3532,8 +3531,12 @@ class ATaxRegistrationAttributesAReceipt(unittest.TestCase):
         self.assertIn('if group_status in ("ask", "unset") and not group_id:', block)
 
     def test_the_console_knows_the_new_state(self):
+        # The lower-case phrasing lived on the settlement form's own group
+        # field, which has gone - it never saved anything. The claim header's
+        # control says the same fact, and it is the one that records the
+        # answer.
         self.assertIn('assigned_by_tax_id: "taxid"', self.app)
-        self.assertIn("the bill is made out to its tax ID", self.app)
+        self.assertIn("The bill is made out to this group's tax ID.", self.app)
 
     def test_the_vendors_registration_is_printed_on_the_claim(self):
         view = self.auth.split("def _submission_view(", 1)[1].split("\ndef ", 1)[0]

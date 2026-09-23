@@ -186,8 +186,8 @@ class TheConsoleAsksTheSameTwoQuestions(unittest.TestCase):
         # money - and finance is who gets asked what the month was spent on.
         self.assertIn("const classFrozen = busy || !(reviewingHere() || settlingHere());",
                       self.app)
-        self.assertIn('["etype"].forEach', self.app)
-        self.assertIn('["headcount", "src", "ccy", "claim-group"].forEach', self.app)
+        self.assertIn('["etype", "claim-group"].forEach', self.app)
+        self.assertIn('["headcount", "src", "ccy"].forEach', self.app)
 
     def test_and_has_somewhere_to_record_it(self):
         # The Save button lives in the reviewer's branch, which finance never
@@ -207,11 +207,12 @@ class TheConsoleAsksTheSameTwoQuestions(unittest.TestCase):
         self.assertNotIn("the verdict recomputes against the same rules", self.app)
         self.assertIn("not what is paid.", self.app)
 
-    def test_the_group_control_defers_to_the_payment_form(self):
-        # It hides where the settlement form asks the same thing - which is a
-        # question about paying, not about reviewing.
-        self.assertIn("const payingHere = settlingHere() && !isPaid(sub)",
-                      self.app)
+    def test_the_group_control_is_the_only_one_and_it_persists(self):
+        # The settlement form's copy wrote to the working copy and saved
+        # nothing, and the button that opened it stopped being drawn once a
+        # settlement could be refused for want of a group.
+        self.assertIn("gfield.hidden = !groups.length;", self.app)
+        self.assertNotIn('<select id="sf-group">', self.app)
 
     def test_a_finance_executive_is_told_why_the_queue_is_read_only(self):
         # A list of claims with no buttons and no explanation reads as a

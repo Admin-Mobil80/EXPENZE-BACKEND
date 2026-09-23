@@ -522,9 +522,10 @@ class TheControlsOnAClosedClaimAreInert(unittest.TestCase):
         # question from the rest - but disjoint, and each assigned once. A
         # second pass over the same control writes `false` back over the
         # first, which is the regression this class exists for.
-        self.assertIn('["headcount", "src", "ccy", "claim-group"].forEach',
-                      self.app)
-        self.assertIn('["etype"].forEach', self.app)
+        self.assertIn('["headcount", "src", "ccy"].forEach', self.app)
+        # The group joins the expense type: both say how the claim is filed,
+        # and filing is finance's. Neither prices it.
+        self.assertIn('["etype", "claim-group"].forEach', self.app)
         self.assertIn("el.disabled = frozen", self.app)
         self.assertIn("el.disabled = classFrozen", self.app)
 
@@ -535,6 +536,7 @@ class TheControlsOnAClosedClaimAreInert(unittest.TestCase):
                  for one in lists]
         names[0].add("headcount"); names[1].add("etype")
         self.assertEqual(set(), names[0] & names[1])
+        self.assertIn("claim-group", names[1])
 
     def test_money_having_moved_freezes_them(self):
         # Not the decision - the payment. A claim approved and waiting to be

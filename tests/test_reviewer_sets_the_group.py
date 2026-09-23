@@ -32,24 +32,31 @@ class TheControlIsOnTheClaimPage(unittest.TestCase):
 
     def test_it_is_hidden_for_an_organisation_with_no_groups(self):
         # An empty dropdown is a question about nothing.
-        self.assertIn("gfield.hidden = !groups.length || payingHere;", self.app)
+        self.assertIn("gfield.hidden = !groups.length;", self.app)
 
-    def test_and_hidden_again_where_the_payment_form_asks_the_same_thing(self):
-        # Two dropdowns over one value six inches apart is a question about
-        # which of them wins. At review this is the only one; at settlement it
-        # belongs beside the amount and the reference.
-        self.assertIn("const payingHere = settlingHere() && !isPaid(sub)", self.app)
-        self.assertIn('id="sf-group"', self.app)
+    def test_and_it_is_the_only_one(self):
+        """The settlement form carried a second, and it saved nothing.
+
+        It wrote the choice into the working copy and passed a *label* along
+        with the notice, so the cost centre on the record was unchanged. Once
+        a settlement started being refused for want of a group, the button
+        that opened that form stopped being drawn - so finance had one control
+        that did not save and another they could not reach, on the one screen
+        where the field had become theirs to fill in.
+        """
+        self.assertNotIn('<select id="sf-group">', self.app)
+        self.assertNotIn('td.querySelector("#sf-group")', self.app)
+        # This one writes through the endpoint that records it.
+        self.assertIn("if (sub.reference) bits.push(esc(sub.reference));", self.app)
+        self.assertIn('id="claim-group"', self.app)
 
     def test_it_freezes_with_every_other_control(self):
         # One rule, not its own. A settled claim must not offer an editable
         # anything.
-        # With the expense type on its own rule, the group stays on the
-        # reviewer's: the settlement form asks it separately where finance
-        # needs it, and two live dropdowns over one value is a question about
-        # which of them wins.
-        self.assertIn('["headcount", "src", "ccy", "claim-group"].forEach',
-                      self.app)
+        # The group is on the same rule as the expense type now: both say how
+        # a claim is filed, filing is finance's, and the settlement form's
+        # duplicate has gone.
+        self.assertIn('["etype", "claim-group"].forEach', self.app)
 
     def test_changing_it_counts_as_a_change_worth_saving(self):
         changed = self.app.split("const changed =", 1)[1].split(";", 1)[0]
@@ -187,3 +194,74 @@ class PickingAGroupIsNotTheSameAsRecordingOne(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FinanceCanSetTheGroupTheyAreBlockedOn(unittest.TestCase):
+    """Madhusudhan could not set a cost centre anywhere on the claim page.
+
+    The settlement is refused without one - correctly, since a payment out of
+    a budget nobody named is the thing that rule exists to stop. But the
+    refusal told him to "set a group above", and above there was nothing: the
+    header's control hid itself whenever the payment form *could* be drawn,
+    and the payment form was not being drawn, because the settlement was
+    refused for want of a group.
+
+    Two controls, one hidden and one unreachable, over a field that had just
+    become his to fill in. The form's copy would not have helped either - it
+    wrote to the working copy and passed a label with the notice, and left the
+    record untouched.
+    """
+
+    def setUp(self):
+        self.app = src("..", "PORTAL", "app.html")
+
+    def test_the_header_control_no_longer_hides_itself(self):
+        self.assertIn("gfield.hidden = !groups.length;", self.app)
+        self.assertNotIn("const payingHere =", self.app)
+
+    def test_finance_can_edit_it(self):
+        # On the looser rule, with the expense type. Both say how a claim is
+        # filed; neither prices it.
+        self.assertIn('["etype", "claim-group"].forEach', self.app)
+        self.assertIn("const classFrozen = busy || !(reviewingHere() || settlingHere());",
+                      self.app)
+
+    def test_and_what_they_set_is_recorded(self):
+        # Through `/claim/retype`, which is the only path that writes the
+        # field. The settlement form's version wrote nothing.
+        save = self.app.split("async function saveAnswers()", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("const chosenGroup = gs && !gs.disabled ? gs.value : null;", save)
+        self.assertIn("group_id: chosenGroup", save)
+
+    def test_the_refusal_points_at_a_control_that_exists(self):
+        self.assertIn("No cost centre is set. Set a group above", self.app)
+
+
+class ASettlementNoticeBelongsToOneClaim(unittest.TestCase):
+    """"Settled in full. Manjunath K J was notified" sat on Rehaan's claim.
+
+    Above a Reject button and an amount still owed. It was true when written,
+    about a different claim and a different person, and nothing took it down -
+    so every claim opened afterwards carried somebody else's receipt for money
+    that had gone to somebody else.
+    """
+
+    def setUp(self):
+        self.app = src("..", "PORTAL", "app.html")
+
+    def test_it_is_stamped_with_the_claim_it_is_about(self):
+        fn = self.app.split("function payMsg(text, good) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("payMsgFor =", fn)
+
+    def test_and_taken_down_when_the_reader_moves_on(self):
+        self.assertIn("if (payMsgFor && payMsgFor !== sub.id) {", self.app)
+
+    def test_it_survives_the_render_that_follows_its_own_click(self):
+        # Cleared on the way in rather than on the way out, the same as the
+        # save confirmation beside it: a reader's own result has to outlive
+        # the re-render their click causes, and only a different claim
+        # invalidates it.
+        clear = self.app.split("if (payMsgFor && payMsgFor !== sub.id) {", 1)[1] \
+                        .split("}", 1)[0]
+        self.assertIn('$("claim-pay-msg")', clear)
+        self.assertIn("payMsgFor = null;", self.app)
