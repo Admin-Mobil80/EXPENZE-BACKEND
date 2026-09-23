@@ -552,6 +552,30 @@ class TheHolderCanSeeTheirOwnFloat(unittest.TestCase):
         self.assertIn("More has been settled against your float than was advanced",
                       fn)
 
+    def test_the_ledger_shows_only_the_readers_own_movements(self):
+        """An owner's own Advance tab listed the whole company's.
+
+        The server narrows the answer for anybody below finance, and this
+        screen leaned on that - right for a submitter, wrong for everybody who
+        can see the whole float. An owner got their own three figures over a
+        ledger of four rows, one theirs and three of them cash handed to a
+        colleague by somebody else. Worse than an empty tab, because it adds
+        up to nothing while looking like it should.
+        """
+        fn = self.app.split("function renderMyFloat() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('const mine = String((LIVE && LIVE.email) || "").toLowerCase();',
+                      fn)
+        self.assertIn('String(m.holder || "").toLowerCase() === mine', fn)
+
+    def test_and_the_administration_screen_still_shows_everybody(self):
+        # Two screens, two questions. "What is out with my colleagues" is the
+        # one that needs the holder column, and it is not this one.
+        fn = self.app.split("function renderAdvances() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("const moves = ADVANCES.movements || [];", fn)
+        self.assertIn("floatRow(m, ccy, 6)", fn)
+        mine = self.app.split("function renderMyFloat() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("floatRow(m, ccy, 5)", mine)
+
     def test_the_ledger_is_the_movements_not_a_summary(self):
         fn = self.app.split("function renderMyFloat() {", 1)[1].split("\n}", 1)[0]
         self.assertIn("ADVANCES.movements", fn)
