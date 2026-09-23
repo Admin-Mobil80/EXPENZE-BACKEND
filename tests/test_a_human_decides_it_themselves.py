@@ -201,7 +201,14 @@ class TheButtonSavesAndStops(unittest.TestCase):
     def test_it_appears_only_when_something_has_changed(self):
         # It used to appear on an unchanged claim too, as the way to ask for a
         # re-run. There is nothing to re-run.
-        self.assertIn("if (unsaved) {", self.app)
+        #
+        # The other three conditions are what moved it out of the reviewer's
+        # branch: `classFrozen` is the same expression that decides whether the
+        # dropdowns above are editable, so the button is offered exactly where
+        # there is something it could record, and the two busy arms own the row
+        # while a write or a decision is in flight.
+        self.assertIn("if (unsaved && !classFrozen && !saving && !deciding) {",
+                      self.app)
 
     def test_it_posts_the_answers_the_reader_could_actually_give(self):
         # The type always - it is the one control every role holds. The

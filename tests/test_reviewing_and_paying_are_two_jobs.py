@@ -28,6 +28,7 @@ exists to keep made once.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import unittest
 
@@ -190,13 +191,31 @@ class TheConsoleAsksTheSameTwoQuestions(unittest.TestCase):
         self.assertIn('["headcount", "src", "ccy"].forEach', self.app)
 
     def test_and_has_somewhere_to_record_it(self):
-        # The Save button lives in the reviewer's branch, which finance never
-        # reaches - so without this the control would come alive under them,
-        # take a change, and offer nothing to write it down with.
-        branch = self.app.split("} else if (!mayReview) {", 1)[1].split(
-            "} else if (isPaid(sub)) {", 1)[0]
-        self.assertIn("!isPristine(sub, w) && !classFrozen", branch)
-        self.assertIn("save.addEventListener(\"click\", saveAnswers);", branch)
+        # Three times now a dropdown has come alive under somebody with nothing
+        # to write the change down with, each time on a different arm of the
+        # same chain: the reviewer's arm had a Save button, the arm a finance
+        # executive reaches on an undecided claim was given one, and the arm
+        # they actually reach - a claim already approved, opened from Pending
+        # settlement - had none. Madhusudhan set the cost centre on Exp-59, the
+        # pick stayed in the browser, and Record a payment went on hiding
+        # behind the group the server still believed was unset.
+        #
+        # So the button is not on an arm of the chain at all. It is drawn once,
+        # before the chain runs, for every reader of the claim page - which is
+        # what this asserts: one construction, above the first branch.
+        detail = self.app.split("function renderDetail() {", 1)[1]
+        chain = detail.index("  if (deciding) {")
+        saves = [m.start() for m in re.finditer(
+            r'save\.addEventListener\("click", saveAnswers\);', detail[:chain + 20000])]
+        self.assertEqual(1, len(saves), "one Save button in renderDetail, not one per branch")
+        self.assertLess(saves[0], chain, "it is drawn before the branch chain")
+
+    def test_the_change_is_named_wherever_the_button_is(self):
+        # Naming it beside the button rather than inside one branch's stamp is
+        # what makes the button legible to a finance executive, who never sees
+        # the reviewer's sentence about approving.
+        self.assertIn('note.textContent = (pending || "Unsaved change") + " — not saved yet.";',
+                      self.app)
 
     def test_the_hint_no_longer_promises_a_re_check(self):
         # "A change to the type or the currency sends it back through the
