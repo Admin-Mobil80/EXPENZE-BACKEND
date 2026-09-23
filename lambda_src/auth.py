@@ -925,6 +925,7 @@ def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict
 
     # Read off the claims themselves rather than stored anywhere, so a claim
     # settled a minute ago is already in the figure.
+    spends: list[dict[str, Any]] = []
     if holders:
         for claim in _submissions_tbl_scan(org_id):
             email = str(claim.get("submitted_by") or "").lower()
@@ -938,6 +939,27 @@ def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict
             if settled and str(claim.get("outcome_source") or "") == "float":
                 # Accounted for out of the advance: this is what draws it down.
                 who["from_float"] += _as_decimal(claim.get("outcome_paid"))
+                # And it belongs in the ledger, not only in the arithmetic.
+                #
+                # The movements list held advances and hand-backs - money in
+                # and money back - and nothing for the claims that spend it.
+                # So the log showed 7,089 advanced with no way to see where
+                # any of it went, and the balance under it could not be got
+                # to from the rows above it. A ledger that does not reconcile
+                # is one somebody has to take on trust, which is the thing a
+                # ledger exists to avoid.
+                spends.append({
+                    "at": int(claim.get("outcome_at") or 0),
+                    "kind": "spent",
+                    "holder": email,
+                    "holder_name": who["name"],
+                    "amount": str(_as_decimal(claim.get("outcome_paid"))),
+                    "currency": who["currency"],
+                    "reference": str(claim.get("reference") or ""),
+                    "vendor": str((claim.get("receipt") or {}).get("vendor") or ""),
+                    "by_name": str(claim.get("outcome_by_name") or ""),
+                    "note": str(claim.get("outcome_reason") or ""),
+                })
             elif settled:
                 # Reimbursed separately. Recorded because finance will ask why
                 # a holder's spend and their float do not line up, and this is
@@ -978,12 +1000,14 @@ def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict
     if mine_only:
         people = [p for p in people if str(p["email"]).lower() == me]
         rows = [r for r in rows if str(r.get("holder") or "").lower() == me]
+        spends = [r for r in spends if str(r.get("holder") or "").lower() == me]
 
-    return _reply(200, {
-        "currency": base,
-        "mine_only": mine_only,
-        "holders": people,
-        "movements": [{
+    # One ledger from two sources, newest first. The cash movements are stored
+    # and the drawdowns are derived from the claims, but that is a fact about
+    # where they live rather than about what they are: each is a thing that
+    # happened to this float, on a day, for an amount.
+    ledger = sorted(
+        [{
             "ts": int(r.get("ts") or 0),
             "at": int(r.get("at") or 0),
             "kind": str(r.get("kind") or "advance"),
@@ -993,9 +1017,30 @@ def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict
             "currency": str(r.get("currency") or base),
             "mode": str(r.get("mode") or ""),
             "reference": str(r.get("reference") or ""),
+            "vendor": "",
             "note": str(r.get("note") or ""),
             "by": str(r.get("by_name") or r.get("by") or ""),
-        } for r in rows[:200]],
+        } for r in rows] + [{
+            "ts": 0,
+            "at": s["at"],
+            "kind": "spent",
+            "holder": s["holder"],
+            "holder_name": s["holder_name"],
+            "amount": s["amount"],
+            "currency": s["currency"],
+            "mode": "",
+            "reference": s["reference"],
+            "vendor": s["vendor"],
+            "note": s["note"],
+            "by": s["by_name"],
+        } for s in spends],
+        key=lambda m: m["at"], reverse=True)
+
+    return _reply(200, {
+        "currency": base,
+        "mine_only": mine_only,
+        "holders": people,
+        "movements": ledger[:200],
     }, origin)
 
 

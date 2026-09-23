@@ -507,5 +507,44 @@ class TheHolderCanSeeTheirOwnFloat(unittest.TestCase):
     def test_the_ledger_is_the_movements_not_a_summary(self):
         fn = self.app.split("function renderMyFloat() {", 1)[1].split("\n}", 1)[0]
         self.assertIn("ADVANCES.movements", fn)
-        for field in ("m.mode", "m.reference", "m.by", "m.note"):
-            self.assertIn(field, fn)
+        # The rows themselves are built once and read by both screens.
+        row = self.app.split("function floatRow(m, ccy, columns) {", 1)[1] \
+                      .split("\n}", 1)[0]
+        for field in ("m.mode", "m.reference", "m.by", "m.note", "m.vendor"):
+            self.assertIn(field, row)
+
+    def test_the_claims_that_spend_it_are_in_the_ledger(self):
+        """The log showed money going in and nothing coming out.
+
+        So a holder saw 7,089 advanced with no way to see where any of it
+        went, and the balance underneath could not be got to from the rows
+        above it. A ledger that does not reconcile is one somebody has to take
+        on trust, which is the thing a ledger exists to avoid.
+        """
+        view = self.auth.split("def _advances_view(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('"kind": "spent"', view)
+        self.assertIn("spends.append({", view)
+        # Emitted from the same branch that draws the balance down, so the two
+        # cannot disagree about which claims spent the float.
+        drawdown = view.split('who["from_float"] +=', 1)[1].split("elif settled", 1)[0]
+        self.assertIn("spends.append({", drawdown)
+
+    def test_and_the_two_sources_become_one_ledger(self):
+        # The cash movements are stored and the drawdowns are derived from the
+        # claims, but that is a fact about where they live rather than about
+        # what they are: each is a thing that happened to this float.
+        view = self.auth.split("def _advances_view(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('key=lambda m: m["at"], reverse=True', view)
+        self.assertIn('"movements": ledger[:200]', view)
+
+    def test_a_drawdown_is_named_by_what_somebody_would_look_up(self):
+        row = self.app.split("function floatRow(m, ccy, columns) {", 1)[1] \
+                      .split("\n}", 1)[0]
+        self.assertIn('spent && m.vendor', row)
+        self.assertIn("m.reference", row)
+
+    def test_money_leaving_reads_differently_from_money_arriving(self):
+        row = self.app.split("function floatRow(m, ccy, columns) {", 1)[1] \
+                      .split("\n}", 1)[0]
+        self.assertIn("const down = spent || back;", row)
+        self.assertIn('down ? "\\u2212" : "+"', row)
