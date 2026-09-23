@@ -158,7 +158,7 @@ class ApprovingDoesNotHandYouAPaymentRun(unittest.TestCase):
         # To the end of the decided-claim branch, not a fixed slice: a branch
         # added above it should not decide whether this passes.
         actions = self.app.split('const abox = $("actions")', 1)[1].split(
-            "} else if (agentMayRelease(sub)) {", 1)[0]
+            '} else if (arm === "agent") {', 1)[0]
         self.assertIn('claimFrom !== "queue"', actions)
         # And it is finance's bar, not the reviewer's: a finance executive may
         # not decide a claim and may certainly decline to pay one.
@@ -169,7 +169,7 @@ class ApprovingDoesNotHandYouAPaymentRun(unittest.TestCase):
         # button. The row now says where the claim went and offers the move a
         # reviewer working a queue actually wants next.
         actions = self.app.split('const abox = $("actions")', 1)[1].split(
-            "} else if (agentMayRelease(sub)) {", 1)[0]
+            '} else if (arm === "agent") {', 1)[0]
         self.assertIn("In Pending settlement now", actions)
         self.assertIn('nx.textContent = "Next claim \u2192"', actions)
         self.assertIn("stepClaim(1)", actions)
@@ -178,12 +178,12 @@ class ApprovingDoesNotHandYouAPaymentRun(unittest.TestCase):
         # A dead button is furniture pretending to be navigation, and the same
         # rule already governs the arrows at the top of the page.
         actions = self.app.split('const abox = $("actions")', 1)[1].split(
-            "} else if (agentMayRelease(sub)) {", 1)[0]
+            '} else if (arm === "agent") {', 1)[0]
         self.assertIn("at >= 0 && claimSiblings[at + 1]", actions)
 
     def test_and_the_claim_is_not_said_to_be_awaiting_payment_once_it_is_paid(self):
         actions = self.app.split('const abox = $("actions")', 1)[1].split(
-            "} else if (agentMayRelease(sub)) {", 1)[0]
+            '} else if (arm === "agent") {', 1)[0]
         said = actions.split("In Pending settlement now", 1)[0]
         self.assertIn("!isPaid(sub) && !stageNow", said)
 

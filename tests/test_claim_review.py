@@ -227,7 +227,7 @@ class APaidClaimIsClosedToDecisions(unittest.TestCase):
 
     def test_the_console_offers_nothing_on_a_paid_claim(self):
         self.assertIn("const isPaid = (sub) => paidFor(sub.id) > 0;", self.app)
-        self.assertIn("} else if (isPaid(sub)) {", self.app)
+        self.assertIn('} else if (arm === "paid") {', self.app)
         self.assertIn("closed to further decisions", self.app)
 
     def test_send_back_and_withdraw_read_the_same_rule(self):
@@ -298,27 +298,30 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
     def test_a_settled_claim_cannot_be_retyped(self):
         self.assertIn('item.get("outcome") == "settled"', self.retype)
 
-    def test_the_console_says_what_is_outstanding_without_blocking(self):
-        # Finance cannot pay a claim missing either, so the reviewer is told -
-        # but they can still approve it and move on.
+    def test_the_console_greys_approve_until_the_claim_is_finished(self):
+        # Told rather than refused was the version in between, and it moved
+        # the work to finance - who cannot pay a claim missing either, on a
+        # screen that does not show them the bill it describes.
         self.assertIn("const typeOk = rules.types.some(t => t.enabled && t.id === w.type);",
                       self.app)
-        self.assertIn("You can still approve it; finance cannot pay ", self.app)
-        self.assertIn("const choices = (unsaved || unreadable)", self.app)
+        self.assertIn("Set the expense type above to approve it.", self.app)
+        self.assertIn("Set the cost centre above to approve it.", self.app)
+        self.assertIn("Set the expense type and the cost centre above to approve it.",
+                      self.app)
 
-    def test_approve_also_waits_for_an_unsaved_change_to_be_saved(self):
+    def test_the_answers_ride_in_on_the_approval(self):
         # Everything above the buttons is a preview the moment a reviewer
-        # touches a control; the server decides against what was written down.
+        # touches a control, and the server decides against what was written
+        # down - so the approval writes them down first. It is one intention,
+        # so it is one press.
         self.assertIn("const unsaved = !isPristine(sub, w);", self.app)
-        self.assertIn("Save it before approving.", self.app)
+        self.assertIn('if (server === "approved" && !isPristine(sub, workingCopy(sub))) {',
+                      self.app)
+        self.assertNotIn("Save it before approving.", self.app)
 
-    def test_the_unsaved_message_wins_over_what_is_outstanding(self):
-        # A reviewer who has just set the type is told to save it, not told to
-        # set it. Being handed back an instruction you have visibly already
-        # followed is how a product loses trust in everything else it says.
-        note = self.app.split("s.textContent = unsaved", 1)[1]
-        self.assertLess(note.index("Save it before approving"),
-                        note.index("You can still approve it"))
+    def test_and_the_reviewer_is_told_that_is_what_will_happen(self):
+        note = self.app.split("s.textContent = unreadable", 1)[1]
+        self.assertIn("Approving records your changes", note)
 
     def test_the_note_names_the_change_rather_than_announcing_one(self):
         # "You have unsaved changes" makes a reviewer hunt for what they
@@ -330,15 +333,15 @@ class AClaimNothingCoversCannotBeApproved(unittest.TestCase):
     def test_one_save_at_a_time_and_the_flag_says_so(self):
         # The state cannot live on the button: the control is redrawn on every
         # render, so the element in flight is not the element that comes back.
-        fn = self.app.split("async function saveAnswers()", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("if (!sub || savingOf) return;", fn)
+        fn = self.app.split("async function saveAnswers(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("if (!sub || savingOf) return false;", fn)
         self.assertIn("savingOf = sub.id;", fn)
         self.assertIn("savingOf = null;", fn)
         self.assertIn("save.disabled = savingOf === sub.id;", self.app)
 
     def test_the_flag_is_cleared_on_every_path(self):
         # Left set by a network error, it is a button that never works again.
-        fn = self.app.split("async function saveAnswers()", 1)[1].split("\n}\n", 1)[0]
+        fn = self.app.split("async function saveAnswers(", 1)[1].split("\n}\n", 1)[0]
         self.assertLess(fn.index("catch"), fn.index("savingOf = null;"))
 
     def test_both_controls_call_the_same_function_directly(self):
@@ -459,7 +462,7 @@ class ASettledClaimSaysSettled(unittest.TestCase):
 
     def test_a_settled_claim_with_no_human_decision_still_reports(self):
         # An agent-cleared claim that was then paid has no `decision` at all.
-        self.assertIn("if (decision || settlementStage(sub)) {", self.app)
+        self.assertIn('if (arm === "decided") {', self.app)
 
     def test_the_reviewer_who_just_decided_is_not_offered_the_other_answer(self):
         # This row held Reopen, which put the claim back in the queue, then a
@@ -470,16 +473,16 @@ class ASettledClaimSaysSettled(unittest.TestCase):
         # the approval look provisional, and it put the one red button on the
         # screen beside a tick a reviewer had just earned.
         self.assertNotIn('decide(sub, "Reopen"', self.app)
-        decided = self.app.split("} else if (decision || settlementStage(sub)) {", 1)[1] \
-                          .split("} else if (agentMayRelease(sub)) {", 1)[0]
+        decided = self.app.split('} else if (arm === "decided") {', 1)[1] \
+                          .split('} else if (arm === "agent") {', 1)[0]
         self.assertIn('claimFrom !== "queue"', decided)
 
     def test_but_finance_paying_it_is(self):
         # Same claim, different reader, different question: "the bill never
         # arrived" and "the paper does not match" are finance's reasons, and
         # nobody else is placed to have them.
-        decided = self.app.split("} else if (decision || settlementStage(sub)) {", 1)[1] \
-                          .split("} else if (agentMayRelease(sub)) {", 1)[0]
+        decided = self.app.split('} else if (arm === "decided") {', 1)[1] \
+                          .split('} else if (arm === "agent") {', 1)[0]
         self.assertIn("settlingHere() && !isPaid(sub)", decided)
         self.assertIn('openReasonForm(sub, "settle_rejected", "Rejected")', decided)
 
@@ -495,8 +498,8 @@ class ASettledClaimSaysSettled(unittest.TestCase):
         # Different question. That claim has never been in front of a person,
         # so refusing it is not undoing anybody's decision - it is the only
         # human check there is on it.
-        agent = self.app.split("} else if (agentMayRelease(sub)) {", 1)[1] \
-                        .split("} else if (unread) {", 1)[0]
+        agent = self.app.split('} else if (arm === "agent") {', 1)[1] \
+                        .split('} else if (arm === "unread") {', 1)[0]
         self.assertIn('openReasonForm(sub, "settle_rejected", "Rejected")', agent)
 
 

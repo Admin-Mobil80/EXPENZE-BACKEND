@@ -140,26 +140,25 @@ class ApproveIsWithheld(unittest.TestCase):
         self.assertIn(
             'const unreadable = res.violations.some(v => v.code === "nothing_read");',
             self.detail)
-        # The expense type and the cost centre no longer withhold Approve -
-        # they are about filing, and are asked at settlement. An unreadable
-        # receipt still does, for a different reason: there is no amount in it
-        # to approve, and setting a type on it does not create one.
-        self.assertIn("const choices = (unsaved || unreadable)", self.detail)
+        # It greys Approve alongside the missing expense type and the missing
+        # cost centre - but for a different reason, and one that setting
+        # either of them does not fix. There is no amount in this claim to
+        # approve, and a type on a claim with no figures does not create one.
+        block = self.detail.split("const blockers = [", 1)[1].split("].filter", 1)[0]
+        self.assertIn("unreadable &&", block)
 
     def test_reject_is_still_offered(self):
-        block = self.detail.split(
-            "const choices = (unsaved || unreadable)",
-            1)[1].split(";", 1)[0]
-        self.assertEqual(2, block.count('"Rejected"'))
+        self.assertIn('["Reject","danger","Rejected", false]', self.detail)
 
-    def test_it_is_named_before_what_is_merely_outstanding(self):
+    def test_it_is_named_first_of_the_three(self):
         # Setting a type on a claim with no figures does not create an amount,
-        # so leading with the type would send somebody the wrong way. The type
-        # and the cost centre are now things finance will need; this is the
-        # thing that makes the claim undecidable.
-        note = self.detail.split("s.textContent = unsaved", 1)[1]
+        # so leading with the type would send somebody the wrong way. This is
+        # the one that makes the claim undecidable rather than unfinished.
+        block = self.detail.split("const blockers = [", 1)[1].split("].filter", 1)[0]
+        self.assertLess(block.index("unreadable &&"), block.index("!typeOk &&"))
+        note = self.detail.split("s.textContent = unreadable", 1)[1]
         self.assertLess(note.index("Nothing was read off this receipt"),
-                        note.index("You can still approve it"))
+                        note.index("Set the expense type"))
 
     def test_the_other_way_out_is_named(self):
         self.assertIn("ask for a clearer photograph of the same bill",

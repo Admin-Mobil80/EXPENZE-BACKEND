@@ -148,44 +148,152 @@ class ApprovingDoesNotWaitForTheFilingFields(unittest.TestCase):
 
 
 class TheConsoleAsksTheSameQuestion(unittest.TestCase):
-    """And the console offers Approve on the same terms the server accepts it.
+    """Approve is greyed until the claim is finished, and then it does it all.
 
-    What still withholds it: an edit that has not reached the server, and a
-    receipt nobody could read. Neither is about filing - one is a change the
-    reviewer can see and the record cannot, the other is a claim with no
-    amount in it to approve.
+    The server's own gate is at the settlement - `_unready_to_pay` - and that
+    stays where it is: it is the last moment the type and the cost centre can
+    be asked and the first moment either matters.
+
+    What the console does in front of it has moved twice. It withheld Approve
+    outright, which left eighteen of twenty claims in the live queue
+    undecidable. Then it offered Approve regardless and said what was
+    outstanding, which moved the work to finance - who cannot pay one without
+    both, and who are reading the claim on a screen that does not show them
+    the bill it describes.
+
+    A disabled button is the version that costs the reviewer nothing. It
+    refuses no decision they have made; it says the claim is not finished,
+    with the two controls that finish it directly above it, and it comes alive
+    the moment they are answered - read off the dropdowns, not off the record,
+    so there is nothing to save first and nothing to come back for.
     """
 
     def setUp(self):
         self.app = read("../PORTAL/app.html")
 
-    def test_approve_waits_only_for_those_two(self):
-        self.assertIn("const choices = (unsaved || unreadable)", self.app)
+    def test_approve_is_greyed_rather_than_withheld(self):
+        self.assertIn('[["Approve as reviewed","primary","Approved", blockers.length],',
+                      self.app)
+        self.assertIn("b.disabled = true;", self.app)
 
-    def test_reject_is_always_offered(self):
-        choices = self.app.split("const choices = (unsaved || unreadable)", 1)[1] \
-                          .split(";", 1)[0]
-        self.assertEqual(2, choices.count('"Reject","danger","Rejected"'))
+    def test_it_waits_for_the_type_the_cost_centre_and_a_readable_bill(self):
+        block = self.app.split("const blockers = [", 1)[1].split("].filter", 1)[0]
+        for reason in ("unreadable &&", "!typeOk &&", "!groupOk &&"):
+            self.assertIn(reason, block)
 
-    def test_the_message_says_what_is_outstanding_not_what_is_blocked(self):
-        # Finance cannot pay a claim missing either, so saying so here saves
-        # them coming back - but a reviewer who knows the bill is good can
-        # approve it and move on.
-        self.assertIn("You can still approve it; finance cannot pay ", self.app)
+    def test_the_cost_centre_is_read_off_the_dropdown_not_the_record(self):
+        # `needsGroup` asks what the server holds, which is right for the line
+        # that reports what is missing and wrong for a button that has to come
+        # alive the moment somebody picks a group - nothing is written down at
+        # that point, and that is the whole idea.
+        self.assertIn('const chosenGroup = ("group" in w) ? String(w.group || "")',
+                      self.app)
+        self.assertIn("const groupOk = !groupsExist || !!chosenGroup;", self.app)
+
+    def test_an_organisation_with_no_cost_centres_is_not_missing_one(self):
+        self.assertIn("const groupsExist = ((ORG_PROFILE.groups || []).length > 0);",
+                      self.app)
+
+    def test_reject_is_never_greyed(self):
+        # Refusing a claim charges nothing to a cost centre and files nothing
+        # under a type, so it is honest whatever is in the dropdowns - and a
+        # reviewer must always be able to refuse a bill.
+        self.assertIn('["Reject","danger","Rejected", false]', self.app)
+
+    def test_a_greyed_button_says_why_on_itself(self):
+        # A disabled control with its reason three lines away looks broken.
+        self.assertIn('b.title = "Not yet — " + blockers.join(", and ") + ".";',
+                      self.app)
 
     def test_the_findings_no_longer_say_before_approving(self):
         # They said "Set it before approving", which stopped being true.
         worker = read("lambda_src/auditor_worker.py")
         self.assertNotIn("Set it before approving.", worker)
         self.assertIn("it cannot be paid without one", worker)
-        self.assertNotIn("before approving it.", self.app)
+
+
+class ApprovingIsTheOnlyButtonOnThatScreen(unittest.TestCase):
+    """Save and then Approve is one intention and two presses.
+
+    A reviewer who sets the expense type is on their way to approving the
+    claim, not filing a correction - so Save was a step the product needed and
+    the person did not, sitting between them and the only thing they came to
+    do. Worse, it was the step that decided whether Approve was even offered,
+    so the sequence was: change a dropdown, watch Approve disappear, press
+    Save, wait, press Approve.
+
+    Now the approval carries the answers in. They are written first, because
+    the server decides against what is recorded rather than against what is on
+    screen, and then the decision is recorded.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split("async function decide(", 1)[1].split(
+            "\nfunction ", 1)[0]
+
+    def test_approving_writes_the_answers_first(self):
+        self.assertIn('if (server === "approved" && !isPristine(sub, workingCopy(sub))) {',
+                      self.fn)
+        self.assertIn("const saved = await saveAnswers({ silent: true });", self.fn)
+
+    def test_nothing_is_decided_against_answers_that_did_not_land(self):
+        after = self.fn.split("const saved = await saveAnswers", 1)[1]
+        self.assertIn("if (!saved) {", after)
+        self.assertIn("return;", after.split("if (!saved) {", 1)[1].split("}", 1)[0])
+
+    def test_rejecting_writes_nothing(self):
+        # It charges nothing to a cost centre and files nothing under a type,
+        # and a failed write must never be able to stop somebody refusing a
+        # bill.
+        guard = self.fn.split("const saved = await saveAnswers", 1)[0] \
+                       .rsplit("if (", 1)[1]
+        self.assertIn('server === "approved"', guard)
+        self.assertNotIn("rejected", guard)
+
+    def test_the_row_is_held_across_both_writes(self):
+        # `saveAnswers` renders on its way through and reloads the records;
+        # without the flag the buttons come back live in between, where a
+        # second click is a second decision on the same claim.
+        held = self.fn.split("decidingOf = sub.id;", 1)[0]
+        self.assertIn('server === "approved"', held)
+
+    def test_but_nothing_is_rendered_before_the_answers_are_read(self):
+        # Freezing the row disables the three dropdowns, and `saveAnswers`
+        # sends only the controls that are enabled - deliberately, so nobody
+        # posts a field they could not edit. A render between the flag and the
+        # read turns the reviewer's group and currency into "not sent".
+        between = self.fn.split("decidingOf = sub.id;", 1)[1].split(
+            "await saveAnswers", 1)[0]
+        self.assertNotIn("renderAll()", between)
+
+    def test_the_stale_row_is_not_decided_against(self):
+        # `loadRecords` rebuilds the list, so the object this was called with
+        # is a copy of something that no longer exists.
+        self.assertIn("sub = SUBMISSIONS.find(s => s.id === sub.id) || sub;", self.fn)
+
+    def test_the_silent_save_says_nothing_about_approving_next(self):
+        save = self.app.split("async function saveAnswers(", 1)[1].split(
+            "\n}\n", 1)[0]
+        self.assertIn("const silent = !!(opts && opts.silent);", save)
+        self.assertIn("if (!silent) {", save)
+        self.assertIn("Approve or reject it when you are ready.", save)
+
+    def test_and_it_reports_whether_the_write_landed(self):
+        save = self.app.split("async function saveAnswers(", 1)[1].split(
+            "\n}\n", 1)[0]
+        self.assertIn("return false;", save)
+        self.assertIn("return true;", save)
+
+    def test_there_is_no_save_button_on_the_reviewer_s_arm(self):
+        self.assertIn('if (unsaved && arm !== "review"', self.app)
 
 
 class TheButtonSavesAndStops(unittest.TestCase):
 
     def setUp(self):
         self.app = read("../PORTAL/app.html")
-        self.fn = self.app.split("async function saveAnswers() {", 1)[1].split(
+        self.fn = self.app.split("async function saveAnswers(opts) {", 1)[1].split(
             "\n}", 1)[0]
 
     def test_there_is_no_re_check_anywhere(self):
@@ -202,13 +310,16 @@ class TheButtonSavesAndStops(unittest.TestCase):
         # It used to appear on an unchanged claim too, as the way to ask for a
         # re-run. There is nothing to re-run.
         #
-        # The other three conditions are what moved it out of the reviewer's
-        # branch: `classFrozen` is the same expression that decides whether the
-        # dropdowns above are editable, so the button is offered exactly where
-        # there is something it could record, and the two busy arms own the row
-        # while a write or a decision is in flight.
-        self.assertIn("if (unsaved && !classFrozen && !saving && !deciding) {",
-                      self.app)
+        # The other conditions are what moved it out of the reviewer's branch
+        # and then off it: `classFrozen` is the same expression that decides
+        # whether the dropdowns above are editable, so the button is offered
+        # exactly where there is something it could record; the two busy arms
+        # own the row while a write or a decision is in flight; and on the
+        # reviewer's arm Approve writes the answers itself, so a second button
+        # there would be two presses for one intention.
+        self.assertIn(
+            'if (unsaved && arm !== "review" && !classFrozen && !saving && !deciding) {',
+            self.app)
 
     def test_it_posts_the_answers_the_reader_could_actually_give(self):
         # The type always - it is the one control every role holds. The
@@ -236,7 +347,7 @@ class TheButtonSavesAndStops(unittest.TestCase):
         self.assertIn("the claim stays", self.fn)
 
     def test_one_save_at_a_time(self):
-        self.assertIn("if (!sub || savingOf) return;", self.fn)
+        self.assertIn("if (!sub || savingOf) return false;", self.fn)
         self.assertIn("savingOf = sub.id;", self.fn)
         self.assertIn("savingOf = null;", self.fn)
 

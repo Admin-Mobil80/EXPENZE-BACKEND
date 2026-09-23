@@ -130,9 +130,12 @@ class TheTablesAndPathsThatBrokeAreNamed(unittest.TestCase):
         for name in re.findall(r"decide\(sub, \"([^\"]+)\"", self.js):
             self.assertTrue(any(f"{name}:" in b or f'"{name}":' in b for b in sendable),
                             f"{name} is sent but REVIEW_ACTION does not map it")
-        # Approve and Reject arrive through the button row's choices array.
-        self.assertIn('["Approve as reviewed","primary","Approved"]', self.js)
-        self.assertIn('["Reject","danger","Rejected"]', self.js)
+        # Approve and Reject arrive through the button row's own array, each
+        # carrying whether it is greyed - Approve when the claim is not
+        # finished, Reject never.
+        self.assertIn('["Approve as reviewed","primary","Approved", blockers.length]',
+                      self.js)
+        self.assertIn('["Reject","danger","Rejected", false]', self.js)
         self.assertIn("decide(sub, action, b)", self.js)
 
     def test_the_currency_lookup_still_has_both_halves(self):

@@ -451,7 +451,7 @@ class MyExpensesLeadsSomewhere(unittest.TestCase):
         # refuse is worse than not showing them at all.
         detail = self.source.split("const abox = $(\"actions\")", 1)[1]
         self.assertIn("const mayReview = reviewingHere();", detail)
-        self.assertIn("} else if (!mayReview) {", detail)
+        self.assertIn('} else if (arm === "watching") {', detail)
 
     def test_withdraw_is_offered_only_on_your_own_unpaid_claim(self):
         detail = self.source.split("const abox = $(\"actions\")", 1)[1].split("if (decision)", 1)[0]
@@ -3834,8 +3834,9 @@ class SettlementPaysOrRefusesAndDoesNotReopen(unittest.TestCase):
         self.assertIn("does not match this claim", reasons)
 
     def test_rejecting_still_exists_where_it_belongs_too(self):
-        # In the review queue, on a claim that is actually under review.
-        self.assertIn('["Reject","danger","Rejected"]', self.app)
+        # In the review queue, on a claim that is actually under review - and
+        # never greyed, whatever is missing from the claim.
+        self.assertIn('["Reject","danger","Rejected", false]', self.app)
 
     def test_the_settlement_reject_form_is_gone_rather_than_orphaned(self):
         # Left behind it would be sixty lines nothing calls, and the next
@@ -4040,7 +4041,7 @@ class TaggingAClaimIsNotConfirmed(unittest.TestCase):
     def setUp(self):
         with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as handle:
             self.app = handle.read()
-        self.fn = self.app.split("async function saveAnswers()", 1)[1].split("\n}\n", 1)[0]
+        self.fn = self.app.split("async function saveAnswers(", 1)[1].split("\n}\n", 1)[0]
 
     def test_saving_asks_nothing(self):
         self.assertNotIn("window.confirm(", self.fn)

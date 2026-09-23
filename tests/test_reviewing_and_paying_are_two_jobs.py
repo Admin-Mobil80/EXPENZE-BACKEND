@@ -204,7 +204,7 @@ class TheConsoleAsksTheSameTwoQuestions(unittest.TestCase):
         # before the chain runs, for every reader of the claim page - which is
         # what this asserts: one construction, above the first branch.
         detail = self.app.split("function renderDetail() {", 1)[1]
-        chain = detail.index("  if (deciding) {")
+        chain = detail.index('  if (arm === "deciding") {')
         saves = [m.start() for m in re.finditer(
             r'save\.addEventListener\("click", saveAnswers\);', detail[:chain + 20000])]
         self.assertEqual(1, len(saves), "one Save button in renderDetail, not one per branch")

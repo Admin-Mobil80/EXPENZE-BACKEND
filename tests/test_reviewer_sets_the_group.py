@@ -229,7 +229,7 @@ class FinanceCanSetTheGroupTheyAreBlockedOn(unittest.TestCase):
     def test_and_what_they_set_is_recorded(self):
         # Through `/claim/retype`, which is the only path that writes the
         # field. The settlement form's version wrote nothing.
-        save = self.app.split("async function saveAnswers()", 1)[1].split("\n}\n", 1)[0]
+        save = self.app.split("async function saveAnswers(", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("const chosenGroup = gs && !gs.disabled ? gs.value : null;", save)
         self.assertIn("group_id: chosenGroup", save)
 
