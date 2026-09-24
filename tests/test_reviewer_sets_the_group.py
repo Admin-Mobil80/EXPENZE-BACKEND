@@ -26,9 +26,21 @@ class TheControlIsOnTheClaimPage(unittest.TestCase):
         self.app = src("..", "PORTAL", "app.html")
 
     def test_it_sits_with_the_other_two_things_a_reviewer_can_change(self):
-        controls = self.app.split('<div class="controls">', 1)[1].split("</div>", 6)[0]
-        self.assertIn('id="claim-group"', self.app)
-        self.assertIn('id="etype"', controls)
+        controls = self.app.split('<div class="controls">', 1)[1].split(
+            '<p class="hint" id="controls-hint">', 1)[0]
+        for field in ('id="claim-group"', 'id="etype"', 'id="ccy"'):
+            self.assertIn(field, controls, field)
+
+    def test_widest_scope_first(self):
+        # Group, then expense type, then currency. Expense type used to lead,
+        # on the argument that it selects the cap the claim is measured
+        # against - true, and not the order the questions get asked in. Whose
+        # budget this comes out of is the first thing a reviewer settles, and
+        # the type is how that budget reports it.
+        controls = self.app.split('<div class="controls">', 1)[1].split(
+            '<p class="hint" id="controls-hint">', 1)[0]
+        self.assertLess(controls.index('id="claim-group"'), controls.index('id="etype"'))
+        self.assertLess(controls.index('id="etype"'), controls.index('id="ccy"'))
 
     def test_it_is_hidden_for_an_organisation_with_no_groups(self):
         # An empty dropdown is a question about nothing.
