@@ -138,6 +138,59 @@ class ItIsNotAThingToDecideOrToPay(unittest.TestCase):
         self.assertIn("the credit for this one was returned", self.app)
 
 
+class AndOutOfTheReports(unittest.TestCase):
+    """₹51,412.19 pending on one screen, ₹42,592.96 on the other.
+
+    The payment run has always skipped a companion - paying an invoice and
+    then paying its own receipt is paying twice - and the Reports tab never
+    did. So the two screens disagreed about what the company owed by exactly
+    ₹8,819.23, which is Mobil80-Exp-19, the second document of Exp-18.
+
+    It is the same ₹8,819.23 that had the float ledger reporting money
+    outstanding with nothing pending settlement. One purchase, counted twice,
+    in the two places nobody had asked the question - which is the argument
+    for asking it once rather than in each reader that happens to remember.
+
+    The receipt count goes through it too. A tab whose money covers seventy
+    claims and whose headline says seventy-one receipts is the same
+    disagreement one line higher up. What did arrive is still said, beside the
+    intake breakdown, where arrivals are the subject.
+    """
+
+    def setUp(self):
+        self.app = src("..", "PORTAL", "app.html")
+
+    def test_there_is_one_filter_and_it_is_named(self):
+        self.assertIn("const claimsOnly = (subs) => subs.filter(sub => !isCompanion(sub));",
+                      self.app)
+
+    def test_every_money_figure_on_the_tab_goes_through_it(self):
+        # `analysed` is what Claimed, Pending settlement, Settled, By expense
+        # type, By group, By user and Where money goes are all summed from.
+        self.assertIn("return claimsOnly(SUBMISSIONS).map(sub => {", self.app)
+
+    def test_so_do_the_triage_counts(self):
+        triage = self.app.split("function renderTriage() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("const period = claimsOnly(SUBMISSIONS.filter(inPeriod));", triage)
+
+    def test_and_the_headline_receipt_count(self):
+        intake = self.app.split("function renderIntake() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("const period = claimsOnly(arrived);", intake)
+        self.assertIn('$("total-count").textContent = period.length;', intake)
+
+    def test_what_arrived_is_still_said_where_arrivals_are_the_subject(self):
+        # Dropping it from the count without saying so anywhere would lose a
+        # document somebody can see arrived, and it cost a credit.
+        intake = self.app.split("function renderIntake() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("const extra = arrived.length - period.length;", intake)
+        self.assertIn("second document", intake)
+        self.assertIn('<span id="intake-extra" hidden></span>', self.app)
+
+    def test_and_only_when_there_was_one(self):
+        intake = self.app.split("function renderIntake() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("note.hidden = !extra;", intake)
+
+
 class FinanceKeepsBothDocuments(unittest.TestCase):
     """Suppressing the companion as a claim must not suppress it as evidence.
 
