@@ -654,3 +654,55 @@ class TheHolderCanSeeTheirOwnFloat(unittest.TestCase):
                       .split("\n}", 1)[0]
         self.assertIn("const down = spent || back;", row)
         self.assertIn('down ? "\\u2212" : "+"', row)
+
+
+class TheLastMovementColumnWasAlwaysAMinuteAgo(unittest.TestCase):
+    """Every holder read "1m ago", including movements from yesterday.
+
+    `agoOf` is `Date.now() / 1000 - seconds`. The float table passed it
+    `h.last_at * 1000`, so every row subtracted a number about a thousand
+    times too large, got a negative, and landed on `Math.max(1, mins)` - which
+    exists so that something recorded eight seconds ago reads "1m ago" rather
+    than "0m ago", and which quietly turned a unit mistake into a plausible
+    answer on every row.
+
+    `at` is in seconds. `floatRow` multiplies it by a thousand a couple of
+    hundred lines up because `dayStamp` takes a Date, and that is right there
+    and wrong here - which is how the two came to disagree while sitting on
+    the same field.
+
+    Both halves are pinned: the call site, and the guard that would have made
+    the mistake visible instead of believable.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split("function agoOf(seconds) {", 1)[1].split(
+            "\n}", 1)[0]
+
+    def test_the_column_passes_seconds(self):
+        self.assertIn('agoOf(h.last_at)', self.app)
+        self.assertNotIn("agoOf(h.last_at * 1000)", self.app)
+
+    def test_every_caller_does(self):
+        # The other one is the invitation, whose `invitedAt` the resend rule
+        # already reads as seconds.
+        calls = re.findall(r"agoOf\(([^)]*)\)", self.app)
+        for call in calls:
+            self.assertNotIn("* 1000", call, call)
+
+    def test_and_the_field_is_in_seconds_on_the_server(self):
+        auth = read("lambda_src/auth.py")
+        view = auth.split("def _advances_view(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('who["last_at"] = max(who["last_at"], int(r.get("at") or 0))',
+                      view)
+
+    def test_a_time_in_the_future_says_nothing(self):
+        # Saying nothing is the honest answer to a time we cannot place, and
+        # it is the one somebody notices. "1m ago" is neither.
+        self.assertIn("if (mins < -5) return \"\";", self.fn)
+
+    def test_but_a_clock_running_a_little_fast_still_reads(self):
+        # Ordinary, and not what the guard is for.
+        self.assertIn("-5", self.fn)
+        self.assertIn("Math.max(1, mins)", self.fn)
