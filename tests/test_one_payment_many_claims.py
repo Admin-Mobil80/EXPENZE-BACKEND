@@ -312,11 +312,14 @@ class TheConsoleOffersItOnlyWhenItMeansSomething(unittest.TestCase):
         # be approved without a type and a group; not tolerable once those
         # became finance's to fill in. Three of twenty were ready and the
         # control vanished without saying so.
-        self.assertIn("const ready = awaiting.filter(c => !payBlocker(c.sub));",
+        self.assertIn("const payableNow = awaiting.filter(c => !payBlocker(c.sub));",
                       self.app)
         self.assertIn("const held = awaiting.filter(c => payBlocker(c.sub));",
                       self.app)
-        self.assertIn("onePayee && ready.length > 1 && can.seeQueue()", self.app)
+        # With nothing ticked this is what it always was: a list narrowed to
+        # one person settles that person's payable claims together.
+        self.assertIn("(!chosen.length && onePayee && payableNow.length > 1)",
+                      self.app)
 
     def test_the_count_says_both_numbers(self):
         # So "settle together" cannot be read as "settle everything of
@@ -337,10 +340,20 @@ class TheConsoleOffersItOnlyWhenItMeansSomething(unittest.TestCase):
         # A control that is simply absent is indistinguishable from one that
         # was never built.
         self.assertIn('const batchWhy = $("pay-batch-why");', self.app)
-        for line in ("Filter by submitter to",
+        for line in ("Tick the rows you are ",
                      "Only one of these can be paid yet",
                      "None of these can be paid yet"):
             self.assertIn(line, self.app)
+
+    def test_a_selection_answers_the_line_before_the_filter_does(self):
+        # Once somebody has ticked a row, "filter by submitter" and "none of
+        # these can be paid" are both answers to a question they have moved
+        # past. One claim is not a batch, and that is what they need told.
+        why = self.app.split('const batchWhy = $("pay-batch-why");', 1)[1] \
+                      .split("\n  }", 1)[0]
+        self.assertIn("chosen.length === 1", why)
+        self.assertLess(why.index("chosen.length === 1"), why.index("!onePayee"))
+        self.assertIn("untick it to choose ", why)
 
     def test_the_form_lists_the_claims_rather_than_counting_them(self):
         fn = self.app.split("function batchForm(claims, ccy, held) {", 1)[1].split(
@@ -716,3 +729,108 @@ class TheConsoleOffersItOnASelection(unittest.TestCase):
         fn = self.app.split("async function setOnPicked(field, value) {", 1)[1] \
                      .split("\n}", 1)[0]
         self.assertNotIn("picked.clear()", fn)
+
+
+class FinancePicksTheRowsGoingIntoThisTransfer(unittest.TestCase):
+    """The filter narrows to a person; the ticks choose which of their claims.
+
+    Those are different questions and only the first had an answer. Filtering
+    to Rehaan offered "settle all four payable claims as one payment" and
+    nothing else - so paying three of somebody's seven receipts, which is an
+    ordinary thing to do when the rest are missing a cost centre or belong to
+    next month's run, meant settling them one at a time.
+
+    The review queue has had row selection since bulk approve shipped. This is
+    the same control on the screen where the money actually moves, with the
+    one constraint that screen has: a transfer goes to one person.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split("function renderPayments() {", 1)[1].split(
+            "\nfunction ", 1)[0]
+
+    def test_there_is_a_box_on_every_row_and_one_over_the_column(self):
+        self.assertIn('<input type="checkbox" data-pay="${esc(c.sub.id)}"', self.fn)
+        self.assertIn('<th scope="col" class="pick" id="pay-pick-head"></th>',
+                      self.app)
+        self.assertIn('all.id = "pay-all";', self.fn)
+
+    def test_only_finance_gets_them(self):
+        # The list is readable by anybody who can see the queue and payable by
+        # the same bar that records a payment.
+        self.assertIn('`<td class="pick">` + (can.seeQueue()', self.fn)
+
+    def test_a_claim_that_cannot_be_paid_cannot_be_ticked(self):
+        # A box that can be ticked on a claim the payment would refuse is a
+        # box that lies - the same rule the review queue's boxes follow.
+        self.assertIn("const why = payBlocker(c.sub)", self.fn)
+        self.assertIn('+ (why ? " disabled" : "")', self.fn)
+
+    def test_nor_can_one_belonging_to_somebody_else(self):
+        # A transfer goes to one person, so the selection has a submitter and
+        # everybody else's rows go dead while it does. Refusing the tick with
+        # the reason on it beats building a mixed selection and saying so at
+        # the end, and beats silently clearing what they had.
+        self.assertIn("A transfer goes to one person.", self.fn)
+        self.assertIn('String(c.sub.who || "") !== pickedWho', self.fn)
+
+    def test_the_submitter_comes_from_what_is_already_ticked(self):
+        who = self.app.split("function payPickedWho(claims) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("claims.find(c => payPicked.has(c.sub.id))", who)
+
+    def test_the_disabled_box_carries_its_own_reason(self):
+        self.assertIn('title="${esc(why || "Pay this one with the others in one transfer")}"',
+                      self.fn)
+
+    def test_the_batch_settles_exactly_what_is_ticked(self):
+        self.assertIn("const ready = chosen.length ? chosen : payableNow;", self.fn)
+        self.assertIn("Settle ${chosen.length} selected as one payment", self.fn)
+
+    def test_and_nothing_is_quietly_left_out_of_it(self):
+        # The "not in this payment" list on the form is for the unfiltered
+        # case, where the button pays what it can of a whole person's list. A
+        # selection is explicit, so there is nothing being left behind to name.
+        self.assertIn("const heldNow = chosen.length ? [] : held;", self.fn)
+
+    def test_one_tick_is_not_a_batch(self):
+        self.assertIn("chosen.length > 1", self.fn)
+
+    def test_the_old_behaviour_survives_with_nothing_ticked(self):
+        # A list narrowed to one person still offers to settle that person's
+        # payable claims together, which is what the filter was built for.
+        self.assertIn("(!chosen.length && onePayee && payableNow.length > 1)",
+                      self.fn)
+
+    def test_a_tick_nobody_can_see_is_dropped(self):
+        # After a payment lands, or the filter moves, the row is gone - and a
+        # selection somebody cannot see is one they cannot check before moving
+        # money. Same rule the queue applies to its own.
+        self.assertIn("const onScreen = new Set(payableNow.map(c => c.sub.id));",
+                      self.fn)
+        self.assertIn("[...payPicked].forEach(id => { if (!onScreen.has(id)) payPicked.delete(id); });",
+                      self.fn)
+
+    def test_ticking_a_row_does_not_open_the_claim(self):
+        # The whole row is a link to the claim page.
+        self.assertIn("e.stopPropagation();", self.fn)
+
+    def test_and_closes_a_form_drawn_for_a_different_selection(self):
+        # The open form lists the claims that were ticked when it was drawn.
+        # Left up over a changed selection it is a form about a payment
+        # nobody is making.
+        wiring = self.fn.split('input[data-pay]', 1)[1].split("});", 1)[0]
+        self.assertIn("batchOpen = false;", wiring)
+
+    def test_select_all_takes_one_person_or_refuses(self):
+        # "Select all" across three people is three transfers, and there is no
+        # honest thing for one box to do about that.
+        self.assertIn('const payAll = $("pay-all");', self.fn)
+        self.assertIn('const who = pickedWho || (payees.size === 1 ? [...payees][0] : "");',
+                      self.fn)
+        self.assertIn("payAll.disabled = !mine.length;", self.fn)
+
+    def test_and_says_how_to_give_it_something_to_do(self):
+        self.assertIn("Filter by submitter, or tick one row, to select a person's claims",
+                      self.fn)
