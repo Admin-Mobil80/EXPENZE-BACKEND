@@ -420,21 +420,30 @@ class TheFloatTabShowsItsWorking(unittest.TestCase):
         self.assertNotIn(">Still out<", head)
         self.assertIn('id="adv-held"', self.app)
 
-    def test_in_flight_is_drawn_only_when_there_is_some(self):
-        # Never irrelevant - it is exactly the gap between the two, so without
-        # it `in hand` moves for a reason nothing on screen explains. But a
-        # column of dashes takes width from the figures that say something.
-        self.assertIn("const anyFlight = holders.some(h => advMinor(h.pending) > 0);",
-                      self.fn)
-        self.assertIn("if (flightHead) flightHead.hidden = !anyFlight;", self.fn)
-        self.assertIn('id="adv-flight-head" hidden', self.app)
+    def test_in_flight_is_always_drawn_and_nought_is_written_out(self):
+        """It was hidden while empty. A nought is an answer; an absence is not.
 
-    def test_and_so_is_its_tile(self):
-        self.assertIn('<div id="adv-gap-tile" hidden>', self.app)
-        self.assertIn("if (gapTile) gapTile.hidden = !flight;", self.fn)
+        The argument for hiding it was that a column of dashes takes width
+        from figures that say something, which is true and is not the whole
+        question: a reader cannot ask about a column that is not there, and on
+        this account it would have been absent every day so far. So it is
+        always drawn, and a holder with nothing in flight reads ₹0.00 rather
+        than an em dash - a figure, so the column reads as an answer rather
+        than as missing data.
+        """
+        self.assertNotIn("anyFlight", self.app)
+        self.assertNotIn('id="adv-flight-head"', self.app)
+        cell = self.fn.split("advMinor(h.pending) ?", 1)[1].split("+", 1)[0]
+        self.assertIn('"var(--warn)" : "var(--muted)"', cell)
+        self.assertIn("`${fmt(advMinor(h.pending), hccy)}</td>`", self.fn)
 
-    def test_the_empty_row_spans_whatever_is_on_screen(self):
-        self.assertIn('colspan="${anyFlight ? 6 : 5}"', self.fn)
+    def test_the_tile_is_drawn_too(self):
+        # A figure nobody can find is worse than one that reads nought.
+        self.assertNotIn("adv-gap-tile", self.app)
+        self.assertIn('id="adv-gap"', self.app)
+
+    def test_the_empty_row_spans_the_whole_table(self):
+        self.assertIn('colspan="6" class="empty">Nobody holds a float.', self.fn)
 
     def test_the_formula_is_printed_on_the_page(self):
         self.assertIn("Still out = advanced", self.fn)
