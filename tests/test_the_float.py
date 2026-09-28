@@ -376,12 +376,52 @@ class TheFloatTabShowsItsWorking(unittest.TestCase):
     def test_every_figure_the_balance_is_made_of_is_a_column(self):
         # A balance somebody cannot reconstruct is one they will not act on.
         head = self.app.split('<tbody id="adv-list">', 1)[0].rsplit("<thead>", 1)[1]
-        for col in ("Advanced", "Settled from it", "Still out", "In flight",
-                    "In hand"):
+        for col in ("In hand", "Advanced", "Settled from it", "In flight"):
             self.assertIn(f">{col}<", head)
+
+    def test_what_they_are_carrying_leads(self):
+        # It is the question somebody actually has about a float holder: can
+        # this person still buy next week's groceries.
+        import re
+        head = self.app.split('<tbody id="adv-list">', 1)[0].rsplit("<thead>", 1)[1]
+        cols = re.findall(r'<th scope="col"[^>]*>([^<]*)</th>', head)
+        self.assertEqual(["Holder", "In hand", "Advanced", "Settled from it",
+                          "In flight", "Last movement"], cols)
+
+    def test_still_out_is_not_a_second_column_saying_the_same_thing(self):
+        # `in hand` is `still out` less what is in flight, and nothing is in
+        # flight on an organisation that settles promptly - so the two printed
+        # one figure under two names, which sends a reader hunting for a
+        # difference that is not there. Still out is on the tile above, where
+        # it is the company's exposure rather than a person's balance.
+        head = self.app.split('<tbody id="adv-list">', 1)[0].rsplit("<thead>", 1)[1]
+        self.assertNotIn(">Still out<", head)
+        self.assertIn('id="adv-held"', self.app)
+
+    def test_in_flight_is_drawn_only_when_there_is_some(self):
+        # Never irrelevant - it is exactly the gap between the two, so without
+        # it `in hand` moves for a reason nothing on screen explains. But a
+        # column of dashes takes width from the figures that say something.
+        self.assertIn("const anyFlight = holders.some(h => advMinor(h.pending) > 0);",
+                      self.fn)
+        self.assertIn("if (flightHead) flightHead.hidden = !anyFlight;", self.fn)
+        self.assertIn('id="adv-flight-head" hidden', self.app)
+
+    def test_and_so_is_its_tile(self):
+        self.assertIn('<div id="adv-gap-tile" hidden>', self.app)
+        self.assertIn("if (gapTile) gapTile.hidden = !flight;", self.fn)
+
+    def test_the_empty_row_spans_whatever_is_on_screen(self):
+        self.assertIn('colspan="${anyFlight ? 6 : 5}"', self.fn)
 
     def test_the_formula_is_printed_on_the_page(self):
         self.assertIn("Still out = advanced", self.fn)
+
+    def test_and_says_how_in_hand_follows_from_it(self):
+        # So the tile above and the column below can be reconciled by reading
+        # rather than by arithmetic somebody has to guess at.
+        self.assertIn("in hand is that less anything spent and waiting to be ",
+                      self.fn)
 
     def test_the_two_acts_are_explained_where_they_are_chosen(self):
         self.assertIn("draws it down and moves no ", self.fn)
