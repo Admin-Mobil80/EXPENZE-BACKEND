@@ -153,3 +153,51 @@ class TheNoticeAndTheLogCountInTheSameCurrency(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheSettlementLogHadTheSameBugOneLayerDown(unittest.TestCase):
+    """The log printed rupee figures under a dollar sign.
+
+    Anthropic at "$14,778.17" when the bill was $153.88 and the transfer was
+    ₹14,778.17 - neither number, and out by a factor of ninety. doola at
+    "$57,332.19". Every row whose receipt was written in something other than
+    the organisation's currency.
+
+    It was not the renderer. `toClaim` rebuilds a settlement record from the
+    claim row for anything read back off the server, and it paired `s.paid` -
+    what left the bank - with `s.currency` - what the bill was written in.
+    Those agree only on a rupee receipt, which is why most rows looked right.
+
+    There is nothing to put in that field instead. Every payout leaves in the
+    organisation's own currency: `payable` hard-codes it, the settle form
+    posts it, and the record written for a payment made in this session takes
+    `claim.payCcy`. So the field goes and the one line that reads it falls
+    back to the organisation's.
+    """
+
+    def setUp(self):
+        self.app = console()
+
+    def test_the_rebuilt_record_no_longer_carries_the_receipt_s_currency(self):
+        record = self.app.split("settlement: s.outcome === \"settled\" && s.paid", 1)[1] \
+                         .split(": null,", 1)[0]
+        self.assertIn('ccy: ""', record)
+        self.assertNotIn("ccy: s.currency", record)
+
+    def test_the_log_falls_back_to_the_organisation_s(self):
+        self.assertIn("fmt(e.amount, e.ccy || orgCurrency())", self.app)
+
+    def test_the_record_written_in_this_session_was_already_right(self):
+        # It takes the payout currency off the claim, and is the shape the
+        # rebuilt one should have had.
+        fn = self.app.split("async function pay(claim, minor, label, detail) {", 1)[1] \
+                     .split("\n}", 1)[0]
+        self.assertIn("ccy: claim.payCcy || orgCurrency(),", fn)
+
+    def test_only_one_line_reads_a_settlement_s_currency(self):
+        # A second reader is a second chance to pair an amount with the wrong
+        # symbol, and the first one went unnoticed for months.
+        #
+        # Comments stripped: the line that gets this right names the field in
+        # the prose beside it, and counting that as a reader fails on the fix.
+        self.assertEqual(1, strip_comments(self.app).count("e.ccy"))
