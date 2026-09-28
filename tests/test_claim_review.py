@@ -554,7 +554,36 @@ class TheControlsOnAClosedClaimAreInert(unittest.TestCase):
         self.assertIn("paid", busy)
         for rule in ("const frozen =", "const classFrozen ="):
             self.assertIn("busy", self.app.split(rule, 1)[1].split(";", 1)[0])
-        self.assertIn("const paid = isPaid(sub) || closed;", self.app)
+        self.assertIn("const paid = isPaid(sub) || closed || isClosed(sub);",
+                      self.app)
+
+    def test_and_so_does_an_ending_of_any_other_kind(self):
+        """A rejected claim kept every control live and kept offering Save.
+
+        `closed` beside it is `settlementStage` - the *settlement* ending:
+        settled, part settled, refused at payment. A reviewer's rejection is
+        none of those, so Mobil80-Exp-84 sat there reading "Rejected — nothing
+        further is needed here" above a live Expense type dropdown, a Save
+        button, and "Cafe Management — not saved yet". Nothing further was
+        needed and the row was still asking for it.
+
+        `isClosed` is the rule the rest of the console already uses for an
+        ending of any kind, and naming it rather than listing the endings
+        again is what stops the next one being forgotten - the same fix the
+        Withdraw guard needed, in the one other place that has to know.
+        """
+        self.assertIn("isClosed(sub)",
+                      self.app.split("const paid =", 1)[1].split(";", 1)[0])
+        self.assertIn('const CLOSED_STAGES = ["settled", "rejected", "withdrawn"];',
+                      self.app)
+
+    def test_so_a_closed_claim_offers_nothing_to_save(self):
+        # The Save button is guarded on `classFrozen`, which `busy` carries
+        # `paid` into - so freezing the controls takes the button with them
+        # rather than needing a second rule that could disagree.
+        self.assertIn('if (unsaved && arm !== "review" && !classFrozen', self.app)
+        self.assertIn("busy", self.app.split("const classFrozen =", 1)[1]
+                                      .split(";", 1)[0])
 
     def test_somebody_who_is_not_reviewing_cannot_edit_them(self):
         frozen = self.app.split("const frozen =", 1)[1].split(";", 1)[0]
