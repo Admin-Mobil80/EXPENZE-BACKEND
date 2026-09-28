@@ -4423,7 +4423,42 @@ class ARejectedClaimIsStillSomewhere(unittest.TestCase):
         self.assertIn("personName(d.by) || rev.by", self.fn)
 
     def test_newest_first(self):
-        self.assertIn("shown.sort((a, b) => ((b.review || {}).at || 0)", self.fn)
+        self.assertIn("shown.sort((a, b) => rejectedInstant(b) - rejectedInstant(a));",
+                      self.fn)
+
+    def test_and_a_claim_finance_refused_is_dated_too(self):
+        # A claim can be turned down twice over, by two people at two moments:
+        # a reviewer deciding the company does not owe it, stamped in
+        # `review.at`, and finance declining to pay a cleared one, stamped in
+        # `rejectedAt` off the settlement outcome. Reading the first alone put
+        # an em dash in the date column of every settlement-stage rejection
+        # and sank it to the bottom of a list ordered by what happened last.
+        self.assertIn("const rejectedInstant = (sub) =>", self.app)
+        fn = self.app.split("const rejectedInstant = (sub) =>", 1)[1].split(
+            ";", 1)[0]
+        self.assertIn('Number((sub.review || {}).at || 0)', fn)
+        self.assertIn("Number(sub.rejectedAt || 0)", fn)
+        self.assertIn("Math.max", fn)
+
+    def test_the_date_leads_the_list(self):
+        head = self.app.split("<h2>Rejected</h2>", 1)[1].split("</tr>", 1)[0]
+        cols = re.findall(r'<th scope="col"[^>]*>([^<]*)</th>', head)
+        self.assertEqual("Rejected on", cols[0])
+        # "When" was the vaguest heading on the page - when what happened.
+        self.assertNotIn("When", cols)
+
+    def test_and_the_cell_formats_the_number_it_is_sorted_by(self):
+        self.assertIn("const at = rejectedInstant(sub);", self.fn)
+        self.assertIn(r'`<td class="day">${esc(at ? dayStamp(at * 1000) : "\u2014")}</td>`',
+                      self.fn)
+
+    def test_the_row_the_header_and_the_empty_state_agree(self):
+        head = self.app.split("<h2>Rejected</h2>", 1)[1].split("</tr>", 1)[0]
+        cols = len(re.findall(r'<th scope="col"', head))
+        body = self.fn.split("const at = rejectedInstant(sub);", 1)[1] \
+                      .split("tb.appendChild(tr);", 1)[0]
+        self.assertEqual(cols, len(re.findall(r"`<td", body)))
+        self.assertIn('colspan="6" class="empty"', self.fn)
 
     def test_the_rows_open_the_claim_like_every_other_list(self):
         self.assertIn("opensClaim(tr, sub.id);", self.fn)
