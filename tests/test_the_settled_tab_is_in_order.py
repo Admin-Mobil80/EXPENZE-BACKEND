@@ -91,6 +91,53 @@ class BothListsUseIt(unittest.TestCase):
                       self.fn)
 
 
+class TheDateLeadsTheList(unittest.TestCase):
+    """It was last, sharing a cell with who recorded the payment and how.
+
+    This tab is sorted by that date, and a sort key the eye has to travel to
+    the right-hand edge to find reads as no sort at all. Every other list in
+    the console leads with its date; this one now does too, and who and how
+    stay together at the end where they are audit detail rather than the thing
+    being looked up.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.head = self.app.split("<h2>Settled claims</h2>", 1)[1].split(
+            "</tr>", 1)[0]
+        self.fn = self.app.split("function renderSettled() {", 1)[1].split(
+            "\nfunction ", 1)[0]
+
+    def test_settled_on_is_the_first_column(self):
+        import re
+        cols = re.findall(r'<th scope="col"[^>]*>([^<]*)</th>', self.head)
+        self.assertEqual("Settled on", cols[0])
+
+    def test_the_old_trailing_column_now_names_what_it_holds(self):
+        import re
+        cols = re.findall(r'<th scope="col"[^>]*>([^<]*)</th>', self.head)
+        self.assertEqual("Recorded by", cols[-1])
+        self.assertNotIn("Settled</th>", self.head)
+
+    def test_the_cell_formats_the_number_the_list_is_sorted_by(self):
+        # Formatting `last.at` instead would let the column and the order
+        # disagree, since only one of them would be reading the stamp.
+        self.assertIn("const at = settledInstant(c.sub, last);", self.fn)
+        self.assertIn('`<td class="day">${esc(at ? dayStamp(at * 1000) : (last.at || ""))}</td>`',
+                      self.fn)
+
+    def test_and_the_date_is_not_printed_twice(self):
+        self.assertNotIn("${last.at || \"\"} &middot; ${last.by", self.app)
+
+    def test_the_row_the_header_and_the_empty_state_all_count_seven(self):
+        import re
+        cols = len(re.findall(r'<th scope="col"', self.head))
+        body = self.fn.split("const at = settledInstant(c.sub, last);", 1)[1] \
+                      .split("tb.appendChild(tr);", 1)[0]
+        self.assertEqual(cols, len(re.findall(r"`<td", body)))
+        self.assertIn('colspan="7" class="empty"', self.fn)
+
+
 class TheBoxesAreBigEnoughToHit(unittest.TestCase):
     """A 13px target in a 41px row, aimed at repeatedly, down a column.
 
