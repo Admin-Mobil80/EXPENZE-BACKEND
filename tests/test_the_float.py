@@ -197,8 +197,30 @@ class TheChoiceIsRecordedOnTheClaim(unittest.TestCase):
         self.assertNotIn("paid_out", formula)
 
     def test_an_unsettled_claim_is_in_flight_not_drawn_down(self):
-        self.assertIn('who["pending"] += _as_decimal(', self.view)
+        self.assertIn('who["pending"] += spent', self.view)
         self.assertIn('"in_hand": str(out - who["pending"])', self.view)
+
+    def test_and_it_reaches_the_ledger_rather_than_only_the_arithmetic(self):
+        # `pending` was a figure with no rows behind it: the tile said
+        # somebody had money in flight and the movements list below it showed
+        # advances, hand-backs and settled drawdowns only. The one number a
+        # holder is most likely to query was the one that could not be traced
+        # to anything, which is what a ledger exists to prevent.
+        self.assertIn('"kind": "in_flight",', self.view)
+        block = self.view.split('"kind": "in_flight",', 1)[1].split("})", 1)[0]
+        for field in ('"reference"', '"vendor"', '"amount": str(spent)'):
+            self.assertIn(field, block, field)
+
+    def test_it_is_dated_when_the_receipt_arrived(self):
+        # Which is when the cash actually left their hands. Nothing has
+        # settled, so there is no outcome stamp to use.
+        self.assertIn('"at": int(claim.get("received_at") or 0) // 1000,', self.view)
+
+    def test_and_the_units_are_converted_on_the_way_in(self):
+        # `received_at` is in milliseconds; every other `at` on this ledger is
+        # in seconds, and the console multiplies by a thousand to format them.
+        entry = self.view.split('"kind": "in_flight",', 1)[0].rsplit("spends.append", 1)[1]
+        self.assertIn("// 1000", entry)
 
 
 class TheLedgerIsAppendOnly(unittest.TestCase):
@@ -686,8 +708,30 @@ class TheHolderCanSeeTheirOwnFloat(unittest.TestCase):
     def test_a_drawdown_is_named_by_what_somebody_would_look_up(self):
         row = self.app.split("function floatRow(m, ccy, columns) {", 1)[1] \
                       .split("\n}", 1)[0]
-        self.assertIn('spent && m.vendor', row)
+        self.assertIn('(spent || flight) && m.vendor', row)
         self.assertIn("m.reference", row)
+
+    def test_one_in_flight_reads_as_neither_a_credit_nor_a_debit(self):
+        # The advance has not been drawn down for it, so a minus would say the
+        # balance had moved and a plus would say the opposite. It is money
+        # spent and waiting on somebody, which is a third thing.
+        row = self.app.split("function floatRow(m, ccy, columns) {", 1)[1] \
+                      .split("\n}", 1)[0]
+        self.assertIn('const flight = m.kind === "in_flight";', row)
+        self.assertIn('flight ? "" : down ? "\\u2212" : "+"', row)
+
+    def test_the_chip_uses_a_class_the_stylesheet_has(self):
+        # A class with no rule behind it is an unstyled chip, and the amber
+        # one this needs already exists.
+        row = self.app.split("function floatRow(m, ccy, columns) {", 1)[1] \
+                      .split("\n}", 1)[0]
+        self.assertIn('flight ? "wait"', row)
+        self.assertIn(".state.wait {", self.app)
+
+    def test_and_says_what_it_is_waiting_on(self):
+        row = self.app.split("function floatRow(m, ccy, columns) {", 1)[1] \
+                      .split("\n}", 1)[0]
+        self.assertIn("Submitted, waiting on review or settlement", row)
 
     def test_money_leaving_reads_differently_from_money_arriving(self):
         row = self.app.split("function floatRow(m, ccy, columns) {", 1)[1] \

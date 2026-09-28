@@ -987,8 +987,38 @@ def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict
             else:
                 # Spent, not yet settled. The cash has left their hands and
                 # the advance has not been drawn down for it yet.
-                who["pending"] += _as_decimal(
+                spent = _as_decimal(
                     (claim.get("verdict") or {}).get("receipt_total"))
+                who["pending"] += spent
+                # And it belongs in the ledger too.
+                #
+                # `pending` was a figure with no rows behind it: the tile said
+                # somebody had money in flight and the movements list below it
+                # showed advances, hand-backs and settled drawdowns only, so
+                # the one number a holder is most likely to query was the one
+                # that could not be traced to anything.
+                #
+                # It is the same event as a drawdown from the holder's side -
+                # they paid for something with the company's cash - and the
+                # only difference is that nobody has yet decided whether the
+                # float or a separate payout accounts for it. So it goes in
+                # the ledger as its own kind, dated when the receipt arrived,
+                # which is when the cash actually left their hands.
+                #
+                # `received_at` is in milliseconds; every other `at` on this
+                # ledger is in seconds.
+                spends.append({
+                    "at": int(claim.get("received_at") or 0) // 1000,
+                    "kind": "in_flight",
+                    "holder": email,
+                    "holder_name": who["name"],
+                    "amount": str(spent),
+                    "currency": who["currency"],
+                    "reference": str(claim.get("reference") or ""),
+                    "vendor": str((claim.get("receipt") or {}).get("vendor") or ""),
+                    "by_name": "",
+                    "note": "",
+                })
 
     people = []
     for who in holders.values():
