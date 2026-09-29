@@ -834,3 +834,62 @@ class FinancePicksTheRowsGoingIntoThisTransfer(unittest.TestCase):
     def test_and_says_how_to_give_it_something_to_do(self):
         self.assertIn("Filter by submitter, or tick one row, to select a person's claims",
                       self.fn)
+
+
+class BulkApproveAnswersToTheSameGateAsTheClaimPage(unittest.TestCase):
+    """Twelve at once could release what one at a time could not.
+
+    Approve on a claim's own page is greyed until the expense type and the
+    cost centre are set. Bulk approve was not, so the same reviewer could
+    release a stack of claims from the queue that the console would have
+    refused individually - and they landed in Pending settlement unpayable,
+    which is the state the gate exists to prevent. Finance then had to set
+    both, on a screen that does not show them the bill.
+
+    The checkbox is deliberately *not* gated on the same rule. Ticking is how
+    a reviewer selects the claims to set a type and a group on, so gating both
+    on one rule would leave the only bulk-fixable claims the ones that did not
+    need fixing. The box selects; the button decides; only the button asks.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split("function paintApproveButton() {", 1)[1].split(
+            "\n}\n", 1)[0]
+
+    def test_the_gate_is_the_pair_the_claim_page_asks_for(self):
+        self.assertIn("const notFinished = (sub) => !!payBlocker(sub);", self.app)
+
+    def test_the_button_is_greyed_on_a_selection_that_is_not_finished(self):
+        self.assertIn("const unfinished = chosen.filter(notFinished);", self.fn)
+        self.assertIn("btn.disabled = approving || unfinished.length > 0;", self.fn)
+
+    def test_the_checkbox_is_not_gated_on_it(self):
+        # Otherwise the claims that need a type set in bulk are exactly the
+        # ones that cannot be selected to set it on.
+        blocker = self.app.split("function approveBlocker(sub) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertNotIn("payBlocker", blocker)
+        self.assertIn("const canApproveNow = (sub) => !approveBlocker(sub);", self.app)
+
+    def test_the_reason_is_on_the_page_not_only_the_tooltip(self):
+        # A greyed button with no sentence beside it is indistinguishable from
+        # a broken one, and the controls that fix it are in the same row.
+        self.assertIn('id="q-approve-why"', self.app)
+        self.assertIn("selected cannot be ", self.fn)
+        self.assertIn('"approved yet \u2014 "', self.fn)
+        self.assertIn("Set them with the two dropdowns above, or untick them.",
+                      self.fn)
+
+    def test_and_it_counts_each_kind_of_shortfall(self):
+        # "2 of 4 cannot be approved" leaves a reviewer opening all four to
+        # find out which dropdown to reach for.
+        self.assertIn("with no expense type", self.fn)
+        self.assertIn("with no cost centre", self.fn)
+
+    def test_the_press_asks_again(self):
+        # A disabled button fires no click, so this does not stop a reviewer -
+        # it stops the selection changing between the paint and the press.
+        fn = self.app.split("async function approvePicked() {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("if (chosen.some(notFinished)) return;", fn)
