@@ -799,3 +799,64 @@ class TheLastMovementColumnWasAlwaysAMinuteAgo(unittest.TestCase):
         # Ordinary, and not what the guard is for.
         self.assertIn("-5", self.fn)
         self.assertIn("Math.max(1, mins)", self.fn)
+
+
+class TheHoldersOwnTabAsksTheSameQuestions(unittest.TestCase):
+    """What the administration table was just fixed for, checked here too.
+
+    Three of them, and this screen was already right about one: every figure
+    is always drawn, so "spent, not yet settled" reads ₹0.00 rather than
+    disappearing. That is the behaviour the administration table has now been
+    given.
+
+    The other two needed doing. The bar led with "still out with you" where
+    the table now leads with what is actually being carried, and - the same
+    shape of confusion that prompted the question about the table - "still out
+    with you" and "in hand" print the same figure whenever nothing is in
+    flight, which is the ordinary day. Two numbers that agree are not
+    self-explanatory; they are a reader wondering which is the real one.
+
+    Unlike the table, all three stay. They answer different questions to the
+    person holding the cash: what is left to spend, what the company will ask
+    them to account for, and what they have already spent and are waiting to
+    hear about. A three-item bar has room the six-column table did not, so
+    what was needed was the sentence underneath rather than a deletion.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.bar = self.app.split('<div class="floatbar">', 1)[1].split("</div>", 1)[0]
+        self.fn = self.app.split("function renderMyFloat() {", 1)[1].split(
+            "\n}", 1)[0]
+
+    def test_what_is_being_carried_leads(self):
+        import re
+        keys = re.findall(r'<span class="k">([^<]*)</span>', self.bar)
+        self.assertEqual(["In hand", "Still out with you",
+                          "Spent, not yet settled"], keys)
+
+    def test_every_figure_is_always_drawn(self):
+        # The thing this screen already had right, and the reason it is worth
+        # pinning: nought is an answer, an absence is not.
+        for el in ("mf-hand", "mf-out", "mf-flight"):
+            self.assertIn(f'$("{el}").textContent = fmt(', self.fn)
+
+    def test_the_relationship_is_explained_even_when_nothing_is_in_flight(self):
+        # It used to explain the gap only when there was one, so on the
+        # ordinary day two headings printed one figure with nothing to say
+        # why.
+        self.assertIn("in hand is the same figure while nothing you have ",
+                      self.fn)
+
+    def test_and_says_which_way_the_gap_runs_when_there_is_one(self):
+        self.assertIn("which is why in hand is lower", self.fn)
+
+    def test_a_reader_with_no_float_is_told_rather_than_dashed_at(self):
+        # Three dashes and an empty table would read as a fault.
+        self.assertIn("No advance has been made to you.", self.fn)
+
+    def test_an_overdrawn_float_still_outranks_both(self):
+        # More settled against it than was advanced is the one thing on this
+        # bar that needs somebody to do something.
+        self.assertLess(self.fn.index("More has been settled against your float"),
+                        self.fn.index("of your claims are spent but not yet settled"))
