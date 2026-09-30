@@ -1508,7 +1508,13 @@ class WhatTheSubmitterIsToldIsWhatWasSent(unittest.TestCase):
         captioned = set(re.findall(r"(\w+):", kinds))
         # `low_credits` goes to whoever can top up, never to a claimant, so it
         # is never recorded against a claim.
-        self.assertEqual(set(), sent - captioned - {"low_credits"})
+        #
+        # `received` acknowledges a *message*, not a claim: one email carrying
+        # three attachments is one acknowledgement covering three claims, and
+        # there is no single claim it belongs to. It is sent and not recorded,
+        # so nothing on the claim page ever has to caption it - the panel
+        # there is about the outcome the submitter was told.
+        self.assertEqual(set(), sent - captioned - {"low_credits", "received"})
 
     def test_the_attribution_says_which_channels_it_reached(self):
         self.assertIn('id="told-attrib"', self.app)

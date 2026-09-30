@@ -541,9 +541,51 @@ def _total_of(claims: list[dict[str, Any]]) -> str:
 # what the agent cannot settle goes to a reviewer, and what a reviewer cannot
 # settle they decide. A claimant hears twice - when it is cleared, and when it
 # is paid or refused.
+def received_notice(claim: dict[str, Any]) -> dict[str, str]:
+    """A receipt arrived. Said on WhatsApp to somebody who sent it by email.
+
+    Somebody who emails a photograph in and hears nothing on the channel they
+    live on cannot tell whether it worked. They get the email reply already -
+    on their own thread, which is the right place for it - and this is the
+    same fact on the phone in their hand, for the people whose number we hold
+    and who verified it.
+
+    Deliberately short. The email carries the filenames, the group and the
+    organisation; this carries the one thing worth having in a notification,
+    which is a reference to quote and the promise that an outcome follows.
+
+    No `subject`: this notice is never emailed. The email acknowledgement is
+    composed in `mail.py` against the sender's own thread, with the message id
+    to reply in place, and a second email saying the same thing in worse words
+    would be the product talking over itself.
+    """
+    reference = " ".join(str(claim.get("claim_ref") or "").split())
+    org = " ".join(str(claim.get("org_name") or "").split())
+    count = int(claim.get("count") or 1)
+
+    head = "*Receipt received*" if count == 1 else f"*{count} receipts received*"
+    lines = [head, ""]
+    # One attachment has a reference worth quoting. Three have three, and
+    # naming the first of them would hand somebody a number that covers a
+    # third of what they sent - so a multi-receipt email is answered by the
+    # count, and the email that went with it carries the list.
+    if count == 1 and reference:
+        lines.append(f"Claim: {reference}" + (f"  ·  {org}" if org else ""))
+    elif org:
+        lines.append(f"Claimed against {org}.")
+    lines += [
+        "",
+        "Sent in by email. It is being read and checked against your expense "
+        "policy, and the outcome follows in a separate message.",
+    ]
+    text = "\n".join(lines)
+    return {"subject": "", "text": text, "whatsapp": text}
+
+
 NOTICES = {"settled": settled_notice, "settled_batch": settled_batch_notice,
            "rejected": rejected_notice,
            "outcome": outcome_notice, "approved": approved_notice,
+           "received": received_notice,
            "low_credits": low_credits_notice, "disputed": disputed_notice}
 
 
@@ -610,7 +652,16 @@ TEMPLATES = {
 # text. Email carries them; WhatsApp gets them only when the reviewer happened
 # to be quick. Giving either one a template is a Meta approval away and would
 # make WhatsApp reliable for both.
-NO_TEMPLATE = {"outcome", "low_credits", "disputed", "approved"}
+# `received` joins them, and it is the one where the limitation bites hardest.
+# A receipt sent by email arrives with no inbound WhatsApp message behind it,
+# so the 24-hour window is open only if that person happened to message the
+# number earlier the same day. Outside it Meta refuses free text and the send
+# fails quietly - the email acknowledgement has already gone, so nothing is
+# lost, but nothing arrives on the phone either. An approved template called
+# `expenze_receipt_received` taking the claim reference and the organisation
+# would make it land every time; until there is one, this is honest about
+# reaching only the people already in a conversation.
+NO_TEMPLATE = {"outcome", "low_credits", "disputed", "approved", "received"}
 
 
 def _template_parameters(kind: str, claim: dict[str, Any]) -> list[str]:

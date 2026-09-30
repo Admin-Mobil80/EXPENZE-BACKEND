@@ -29,6 +29,7 @@ import boto3
 
 import identity
 import intake
+import notify
 import receipts
 
 logger = logging.getLogger()
@@ -240,6 +241,46 @@ def _acknowledge(msg: Message, sender: str, outcomes: list[dict[str, Any]]) -> N
     # work around.
     _reply_on_thread(msg, sender, subject_line, lines)
     logger.info("acknowledged %d receipt(s) to the sender", len(queued))
+    if queued:
+        _also_on_whatsapp(sender, queued)
+
+
+def _also_on_whatsapp(sender: str, queued: list[dict[str, Any]]) -> None:
+    """The same "it arrived" on the phone, for somebody who emailed it in.
+
+    A person who sends a photograph to an address and hears nothing on the
+    channel they actually live on cannot tell whether it worked. The email
+    reply above is the complete answer and it is on their own thread, which
+    is the right place for it - this is the same fact where they will see it.
+
+    Only a number its owner verified. One somebody typed into the People
+    screen proves nothing, and `notify.send` enforces that itself; this asks
+    the same question first so a member with no number never reaches it.
+
+    Never raises, and never blocks. The receipt is queued, the email has
+    gone, and a WhatsApp that does not land must not turn a successful
+    submission into a failed one.
+
+    Reaches only people already inside WhatsApp's 24-hour window, because an
+    emailed receipt brings no inbound message with it and there is no approved
+    template for this notice yet. `NO_TEMPLATE` in notify.py says what
+    approving one would change.
+    """
+    try:
+        member = identity.resolve_by_email(sender, channel=None)
+        if not member:
+            return
+        if not str(member.get("mobile") or "").strip():
+            return
+        if member.get("whatsapp_channel") != "active":
+            return
+        notify.send("received", member, {
+            "claim_ref": str(queued[0].get("reference") or ""),
+            "org_name": str(queued[0].get("org_name") or ""),
+            "count": len(queued),
+        }, only="whatsapp")
+    except Exception:
+        logger.exception("could not WhatsApp the receipt acknowledgement")
 
 
 def _reply_on_thread(msg: Message, sender: str, subject_line: str,
