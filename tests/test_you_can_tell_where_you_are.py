@@ -184,8 +184,16 @@ class ApprovingDoesNotHandYouAPaymentRun(unittest.TestCase):
     def test_and_the_claim_is_not_said_to_be_awaiting_payment_once_it_is_paid(self):
         actions = self.app.split('const abox = $("actions")', 1)[1].split(
             '} else if (arm === "agent") {', 1)[0]
-        said = actions.split("In Pending settlement now", 1)[0]
-        self.assertIn("!isPaid(sub) && !stageNow", said)
+        # Both sentences that say it: the confirmation shown straight after a
+        # decision, and the stamp on a decided claim opened later. A claim
+        # decided a second ago is never settled - `decide` runs on an
+        # undecided one - but `loadRecords` runs between the write and the
+        # render, and finance settling it in another tab in that window would
+        # make this the one line on screen that was already false.
+        first = actions.split("In Pending settlement now", 1)[0]
+        self.assertIn("isPaid(sub) || settledAlready", first)
+        second = actions.split("In Pending settlement now", 2)[1]
+        self.assertIn("!isPaid(sub) && !stageNow", first + second)
 
 
 class OneClassNameOneMeaning(unittest.TestCase):
@@ -227,3 +235,78 @@ class OneClassNameOneMeaning(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheConfirmationAfterADecision(unittest.TestCase):
+    """Pressing Approve left the page looking the same, minus a button.
+
+    What a reviewer got was a row of small monospace stamps in the strip the
+    button had been in: a tick, a name, a time, a sentence about Pending
+    settlement, and Next among them. Every word true, and none of it reading
+    as the answer to "did that work".
+
+    So a decision made here gets a confirmation shaped like one - what was
+    decided, what becomes of the claim, and the way on - and the way on is a
+    real button rather than a stamp among stamps, because working a queue is
+    one decision after another.
+
+    Only a decision made *here*. Opening a claim somebody decided last week
+    from the Settled tab should say what happened to it, not congratulate the
+    reader on something they did not just do.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split(
+            '} else if (arm === "decided" && justDecided && justDecided.id === sub.id) {',
+            1)[1].split('\n  } else if (arm === "decided") {', 1)[0]
+
+    def test_it_is_pinned_to_the_claim_that_was_decided(self):
+        # Otherwise stepping to the next claim confirms the last decision over
+        # a different claim.
+        self.assertIn("justDecided = REVIEW_ACTION[action] ? { id: sub.id, action } : null;",
+                      self.app)
+        self.assertIn("justDecided && justDecided.id === sub.id", self.app)
+
+    def test_a_claim_decided_earlier_still_gets_the_plain_stamp(self):
+        # The arm below it, unchanged.
+        self.assertIn('} else if (arm === "decided") {', self.app)
+
+    def test_it_says_what_was_decided_and_by_whom(self):
+        self.assertIn('"\\u2715 Rejected" : "\\u2713 Approved"', self.fn)
+        self.assertIn("decision.by ? ` by ${personName(decision.by)}`", self.fn)
+
+    def test_and_names_the_claim_so_it_stands_on_its_own(self):
+        # Without relying on the reader still having the header in view.
+        self.assertIn("sub.reference", self.fn)
+        self.assertIn("sub.who", self.fn)
+        self.assertIn("payable(sub)", self.fn)
+
+    def test_and_what_becomes_of_it(self):
+        self.assertIn("In Pending settlement now", self.fn)
+        self.assertIn("Not being reimbursed.", self.fn)
+
+    def test_a_refusal_does_not_read_like_an_approval(self):
+        self.assertIn('done.className = "decided" + (refusedNow ? " bad" : "");',
+                      self.fn)
+        self.assertIn(".decided.bad .dhead { color:var(--bad); }", self.app)
+
+    def test_the_way_on_is_a_button_not_a_stamp(self):
+        self.assertIn('nx.className = "btn primary"', self.fn)
+        self.assertIn("stepClaim(1)", self.fn)
+
+    def test_and_it_is_absent_when_there_is_nowhere_to_go(self):
+        # A dead button is furniture pretending to be navigation.
+        self.assertIn("const onward = mayReview && at >= 0 && claimSiblings[at + 1];",
+                      self.fn)
+
+    def test_an_empty_queue_is_an_ending_with_a_way_out_of_it(self):
+        # Deciding the last claim used to leave the reviewer on it with no
+        # sign the work was over - the only way to find out was to press Back
+        # and read an empty list.
+        self.assertIn("Nothing else is waiting for review.", self.fn)
+        self.assertIn('goTo("payments")', self.fn)
+
+    def test_and_a_queue_that_is_not_empty_says_how_much_is_left(self):
+        self.assertIn("const left = SUBMISSIONS.filter(isQueued).length;", self.fn)
+        self.assertIn("still waiting for review.", self.fn)
