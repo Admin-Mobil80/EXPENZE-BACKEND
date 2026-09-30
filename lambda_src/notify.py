@@ -638,6 +638,12 @@ def _send_email(to: str, subject: str, text: str) -> str:
 TEMPLATES = {
     "settled": ("settledTemplate", "expenze_claim_settled"),
     "rejected": ("rejectedTemplate", "expenze_claim_rejected"),
+    # The one notice here that is not an outcome. A receipt emailed in brings
+    # no inbound WhatsApp message with it, so the 24-hour customer-service
+    # window is shut for everybody except the handful who happened to message
+    # the number earlier that day - which is to say free text would reach
+    # almost nobody. This is the template that makes it land.
+    "received": ("receivedTemplate", "expenze_receipt_received"),
 }
 
 # Notices with no approved template of their own. An outcome answers a message
@@ -652,16 +658,7 @@ TEMPLATES = {
 # text. Email carries them; WhatsApp gets them only when the reviewer happened
 # to be quick. Giving either one a template is a Meta approval away and would
 # make WhatsApp reliable for both.
-# `received` joins them, and it is the one where the limitation bites hardest.
-# A receipt sent by email arrives with no inbound WhatsApp message behind it,
-# so the 24-hour window is open only if that person happened to message the
-# number earlier the same day. Outside it Meta refuses free text and the send
-# fails quietly - the email acknowledgement has already gone, so nothing is
-# lost, but nothing arrives on the phone either. An approved template called
-# `expenze_receipt_received` taking the claim reference and the organisation
-# would make it land every time; until there is one, this is honest about
-# reaching only the people already in a conversation.
-NO_TEMPLATE = {"outcome", "low_credits", "disputed", "approved", "received"}
+NO_TEMPLATE = {"outcome", "low_credits", "disputed", "approved"}
 
 
 def _template_parameters(kind: str, claim: dict[str, Any]) -> list[str]:
@@ -671,7 +668,16 @@ def _template_parameters(kind: str, claim: dict[str, Any]) -> list[str]:
     parameter containing a newline or a tab, and drops empty ones.
     """
     ccy = str(claim.get("currency") or "")
-    if kind == "settled":
+    if kind == "received":
+        # One reference where there is one, and a phrase that covers the rest
+        # where an email carried several - naming the first of three hands
+        # somebody a number for a third of what they sent.
+        count = int(claim.get("count") or 1)
+        ref = str(claim.get("claim_ref") or "").strip()
+        which = (f"{ref} and {count - 1} more" if ref and count > 1
+                 else ref or f"{count} receipts")
+        values = [which, claim.get("org_name") or "your organisation"]
+    elif kind == "settled":
         values = [claim.get("vendor"), money(claim.get("paid"), ccy),
                   claim.get("reference") or "not recorded",
                   claim.get("paid_on") or "today",

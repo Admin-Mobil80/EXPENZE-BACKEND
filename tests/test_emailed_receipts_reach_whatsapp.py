@@ -9,13 +9,12 @@ went quiet on the channel they watch.
 So the same "it arrived" goes to WhatsApp, for the people whose number we hold
 and who verified it.
 
-**What this cannot do yet.** An emailed receipt brings no inbound WhatsApp
-message with it, so Meta's 24-hour customer-service window is open only if
-that person happened to message the number earlier the same day. Outside it
-free text is refused. There is no approved template for this notice, so the
-send fails quietly - the email has already gone, nothing is lost, and nothing
-arrives on the phone either. A template named `expenze_receipt_received`
-taking the reference and the organisation would make it land every time.
+**Why it is a template.** An emailed receipt brings no inbound WhatsApp
+message with it, so Meta's 24-hour customer-service window is shut for
+everybody except the handful who happened to message the number earlier that
+day - free text would reach almost nobody. `expenze_receipt_received` is
+approved on the Expenze WABA and takes the claim reference and the
+organisation, so this lands whatever the window is doing.
 
 **What it must never do.** Turn a queued receipt into a failed one. The claim
 is stored, charged and queued before any of this runs.
@@ -99,19 +98,54 @@ class ItGoesOutWithTheEmailAcknowledgement(unittest.TestCase):
         self.assertIn("logger.exception(", self.fn)
 
 
-class TheWindowIsNamedRatherThanPretendedAway(unittest.TestCase):
-    """It reaches only people already in a conversation, and says so."""
+class ItGoesAsAnApprovedTemplate(unittest.TestCase):
+    """Because free text would reach almost nobody.
+
+    A receipt emailed in brings no inbound WhatsApp message with it, so Meta's
+    24-hour customer-service window is shut for everybody except the handful
+    who happened to message the number earlier that day. Every other notice
+    here answers something the person sent minutes ago and can go as text;
+    this one cannot.
+
+    `expenze_receipt_received` is the template, approved on the Expenze WABA,
+    taking the claim reference and the organisation.
+    """
 
     def setUp(self):
         self.notify = read("notify.py")
 
-    def test_it_goes_as_text_because_there_is_no_template_for_it(self):
+    def test_it_is_registered_as_a_template_not_as_free_text(self):
+        self.assertIn('"received": ("receivedTemplate", "expenze_receipt_received"),',
+                      self.notify)
         self.assertIn('NO_TEMPLATE = {"outcome", "low_credits", "disputed", '
-                      '"approved", "received"}', self.notify)
+                      '"approved"}', self.notify)
 
-    def test_and_the_template_that_would_fix_it_is_named(self):
-        # So the next person to read this knows what to ask Meta for.
-        self.assertIn("expenze_receipt_received", self.notify)
+    def test_the_name_is_overridable_from_the_secret(self):
+        # Same shape as the other two, so a rename is a secret update rather
+        # than a deploy.
+        self.assertIn('cfg.get(key, fallback)', self.notify)
+
+    def test_one_receipt_passes_its_own_reference(self):
+        fn = self.notify.split("def _template_parameters(", 1)[1].split(
+            "\ndef ", 1)[0]
+        self.assertIn('if kind == "received":', fn)
+        self.assertIn('claim.get("org_name") or "your organisation"', fn)
+
+    def test_and_several_are_named_without_pretending_to_be_one(self):
+        # Naming the first of three hands somebody a number covering a third
+        # of what they sent.
+        fn = self.notify.split("def _template_parameters(", 1)[1].split(
+            "\ndef ", 1)[0]
+        self.assertIn('f"{ref} and {count - 1} more"', fn)
+        self.assertIn('f"{count} receipts"', fn)
+
+    def test_every_parameter_is_non_empty(self):
+        # WhatsApp drops an empty template parameter and the message arrives
+        # malformed, so each one has a fallback.
+        fn = self.notify.split("def _template_parameters(", 1)[1].split(
+            "\ndef ", 1)[0]
+        self.assertIn('or "your organisation"', fn)
+        self.assertIn('str(v or "-").split()', fn)
 
     def test_a_refused_send_is_swallowed_not_raised(self):
         fn = self.notify.split("def _send_whatsapp(", 1)[1].split("\ndef ", 1)[0]
