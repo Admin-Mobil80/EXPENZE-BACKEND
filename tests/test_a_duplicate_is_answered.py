@@ -110,3 +110,80 @@ class EmailAnswersItToo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ADuplicateOfAClaimNobodyIsPaying(unittest.TestCase):
+    """Mobil80-Exp-89 stayed flagged after Exp-86 was withdrawn.
+
+    Nothing was broken in the fingerprint machinery. Withdrawing a claim
+    releases every key it held, precisely so the resubmission it was withdrawn
+    to make is not turned away - and it did. It released them seven minutes
+    too late: Exp-89 arrived at 09:32 and Exp-86 was withdrawn at 09:39, so
+    the audit ran while the other claim was still live.
+
+    A verdict is a snapshot of the moment it was computed and nothing re-reads
+    it. That is deliberate - re-auditing behind a reviewer is the design this
+    product does not have. But a duplicate finding is a statement about
+    *another claim*, and that claim's state is live. So it is checked when the
+    finding is read, rather than leaving a reviewer to compare a bill against
+    something nobody is claiming.
+
+    Settled is not one of the endings that stands it down. A duplicate of a
+    bill that has actually been paid is the case this finding exists for.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "..", "PORTAL", "app.html"),
+                  encoding="utf-8") as fh:
+            self.app = fh.read()
+        self.fn = self.app.split("function duplicateSettled(sub) {", 1)[1].split(
+            "\n}", 1)[0]
+
+    def test_it_asks_the_other_claim_what_became_of_it(self):
+        self.assertIn("SUBMISSIONS.find(s => s.reference === ref || s.id === ref)",
+                      self.fn)
+        self.assertIn("const stage = claimStage(other).stage;", self.fn)
+
+    def test_withdrawn_and_rejected_stand_it_down(self):
+        self.assertIn('(stage === "withdrawn" || stage === "rejected") ? stage : null',
+                      self.fn)
+
+    def test_but_a_settled_one_does_not(self):
+        # The case the finding exists for: the same bill, paid once already.
+        self.assertNotIn('"settled"', self.fn)
+
+    def test_a_claim_that_cannot_be_found_changes_nothing(self):
+        # Outside the loaded window, or on another account. Saying "that one
+        # was withdrawn" about a claim nobody can see would be a guess.
+        self.assertIn("if (!other) return null;", self.fn)
+
+    def test_the_finding_says_what_actually_happened(self):
+        # The row stays - the two receipts really were the same bill, and that
+        # is worth seeing - it just stops reading as something to weigh up.
+        self.assertIn("so nothing ", self.app)
+        self.assertIn("This one stands on its own.", self.app)
+
+    def test_and_stops_reading_as_a_warning(self):
+        self.assertIn('row.className = "violation " + (wentAway ? "deduct"', self.app)
+        self.assertIn('v.code === "possible_duplicate" && !wentAway ? " dupe" : ""',
+                      self.app)
+
+    def test_the_queue_chip_goes_with_it(self):
+        # A red chip pointing at a claim nobody is paying is a reviewer
+        # opening two receipts to find there was never anything to compare.
+        self.assertIn("const dupe = sub.duplicateOf && !duplicateSettled(sub)",
+                      self.app)
+
+    def test_and_so_does_the_rejection_reason(self):
+        # It sits at the top of the list, so it is the reason that would be
+        # reached for first - and "the same bill as Exp-86, which has already
+        # been claimed" is not true of a claim that was withdrawn.
+        self.assertIn("if (sub.duplicateOf && !duplicateSettled(sub)) {", self.app)
+
+    def test_the_release_on_withdrawal_is_still_there(self):
+        # It is not the bug, and it is what stops the next resubmission being
+        # turned away - this time in the right order.
+        review = src("auth.py").split("def _claim_review(", 1)[1].split(
+            "\ndef ", 1)[0]
+        self.assertIn('if action in ("rejected", "withdrawn"):', review)
+        self.assertIn("duplicates.release_all(", review)
