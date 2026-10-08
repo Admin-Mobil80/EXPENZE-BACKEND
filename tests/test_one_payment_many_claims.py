@@ -904,3 +904,43 @@ class BulkApproveAnswersToTheSameGateAsTheClaimPage(unittest.TestCase):
         fn = self.app.split("async function approvePicked() {", 1)[1].split(
             "\n}", 1)[0]
         self.assertIn("if (chosen.some(notFinished)) return;", fn)
+
+
+class ThePaymentQueueIsOldestFirst(unittest.TestCase):
+    """It is a queue of people waiting for their own money.
+
+    The list came out newest first - the order the claims were scanned in,
+    which is the right order for a log and the wrong one for a payment run.
+    The claim somebody had been chasing for three weeks sat at the bottom,
+    under the one that arrived this morning, so a finance executive working
+    down the screen paid the patient last.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split("function renderPayments() {", 1)[1].split(
+            "\nfunction ", 1)[0]
+
+    def test_the_list_is_sorted_by_when_the_receipt_arrived(self):
+        self.assertIn(".sort((a, b) => (Number(a.sub.at) || 0) - (Number(b.sub.at) || 0));",
+                      self.fn)
+
+    def test_it_sorts_on_the_instant_not_the_printed_day(self):
+        # Two claims sent on one day would tie on the date the column shows
+        # and fall back to whatever order the scan returned.
+        self.assertIn("Number(a.sub.at)", self.fn)
+        self.assertNotIn("a.sub.date", self.fn)
+
+    def test_a_claim_with_no_timestamp_sorts_to_the_top_rather_than_throwing(self):
+        self.assertIn("|| 0", self.fn.split(".sort((a, b) =>", 1)[1].split(";", 1)[0])
+
+    def test_the_print_stack_follows_without_being_told(self):
+        # "Every bill in this list, in the order the list is in" - which is
+        # now the order somebody would pay them in.
+        self.assertIn("printBills(awaiting.map(c => c.sub), payMsg)", self.fn)
+        self.assertLess(self.fn.index("const awaiting = claims.filter"),
+                        self.fn.index("printBills(awaiting.map"))
+
+    def test_and_so_does_the_batch_form(self):
+        self.assertLess(self.fn.index("const awaiting = claims.filter"),
+                        self.fn.index("const payableNow = awaiting.filter"))
