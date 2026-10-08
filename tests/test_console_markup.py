@@ -1305,7 +1305,7 @@ class TheBudgetScopeListIsBounded(unittest.TestCase):
 
     def test_only_the_chosen_kind_is_drawn(self):
         block = self.app.split("function renderBudgets(", 1)[1].split("\n}", 1)[0]
-        rows = block.split("const groups = ORG_PROFILE.groups.filter", 1)[1]
+        rows = block.split("const groups = pickableGroups().filter", 1)[1]
         self.assertIn("} else if (budScopeKind ===", rows)
         # Choosing a tab sets the kind and moves the selection with it.
         self.assertIn("budScopeKind = kind;", block)
@@ -3264,10 +3264,14 @@ class AnInvitationSaysWhichTeamTheyJoin(unittest.TestCase):
     def test_the_choices_are_rebuilt_on_every_render(self):
         # Groups are edited on another tab and by other people. A list built
         # once at load offers one somebody has since deleted and omits the one
-        # they added a minute ago.
+        # they added a minute ago. `pickableGroups` reads `ORG_PROFILE.groups`
+        # when it is called, and it is called from here on every render.
         block = self.app.split('const gsel = $("p-group");', 1)[1].split("const tb = $(\"people\")", 1)[0]
-        self.assertIn("ORG_PROFILE.groups || []", block)
+        self.assertIn("pickableGroups()", block)
         self.assertIn("gsel.textContent = \"\";", block)
+        helper = self.app.split("function pickableGroups() {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("ORG_PROFILE.groups || []", helper)
 
     def test_a_choice_already_made_survives_a_rerender(self):
         block = self.app.split('const gsel = $("p-group");', 1)[1].split("const tb = $(\"people\")", 1)[0]
