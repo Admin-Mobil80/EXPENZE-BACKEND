@@ -705,12 +705,23 @@ class TheConsoleOffersItOnASelection(unittest.TestCase):
     def test_the_lists_are_rebuilt_rather_than_cached(self):
         # Both are editable on other screens, so a list built at load goes
         # stale the moment somebody adds a type - which is exactly when a
-        # reviewer would reach for it.
-        self.assertIn("rules.types.filter(t => t.enabled)", self.fn)
+        # reviewer would reach for it. `pickableTypes` reads `rules.types`
+        # when it is called, and it is called from here on every paint.
+        self.assertIn("pickableTypes()", self.fn)
         self.assertIn("(ORG_PROFILE.groups || [])", self.fn)
 
     def test_a_disabled_type_is_not_offered(self):
-        self.assertIn("filter(t => t.enabled)", self.fn)
+        helper = self.app.split("function pickableTypes() {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("rules.types.filter(t => t.enabled)", helper)
+
+    def test_and_the_order_is_the_one_the_claim_page_uses(self):
+        # A reviewer who learns where to look on the claim page should not
+        # have to relearn it here.
+        self.assertIn("pickableTypes()", self.fn)
+        detail = self.app.split('const et = $("etype"); et.textContent = "";',
+                                1)[1].split("\n", 2)[1]
+        self.assertIn("pickableTypes()", detail)
 
     def test_the_group_setter_is_absent_where_there_are_no_groups(self):
         self.assertIn('groupSel.hidden = !show || !(ORG_PROFILE.groups || []).length;',
