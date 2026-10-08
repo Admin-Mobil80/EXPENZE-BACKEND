@@ -162,7 +162,30 @@ class ApprovingABlockedClaimReleasesSomething(unittest.TestCase):
         self.assertIn('verdict.get("provisional_total")', self.body)
 
     def test_a_claim_that_already_pays_something_keeps_its_own_figure(self):
-        self.assertIn('approved_total = str(verdict.get("reimbursable_total") or "0")', self.body)
+        # First of the three candidates, so a claim the engine priced keeps
+        # the engine's figure.
+        self.assertIn('for candidate in ("reimbursable_total", "provisional_total",',
+                      self.body)
+        self.assertIn('"receipt_total"):', self.body)
+        self.assertIn("if _as_decimal(approved_total) > 0:", self.body)
+
+    def test_and_a_verdict_with_neither_falls_back_to_the_bill(self):
+        """Mobil80-Exp-89 was approved for INR 1,999.00 and stored as 0.
+
+        `reimbursable_total` was "0.00" because `possible_duplicate` was
+        blocking it, and that verdict carried no `provisional_total` at all -
+        so the fallback fell through to the literal "0". `payableClaims`
+        drops a claim worth nothing, so it vanished from Pending settlement
+        while the submitter went on seeing it listed as awaiting payment.
+        Money nobody would ever pay, invisible to the person who pays.
+
+        `receipt_total` is the figure that is always there, and it is what
+        the reviewer was looking at when they said yes.
+        """
+        self.assertIn('"receipt_total"):', self.body)
+        order = self.body.split("for candidate in (", 1)[1].split("):", 1)[0]
+        self.assertLess(order.index("reimbursable_total"), order.index("provisional_total"))
+        self.assertLess(order.index("provisional_total"), order.index("receipt_total"))
 
     def test_the_engine_s_verdict_is_left_alone(self):
         # "The engine computed needs_review and nothing payable" and "a named

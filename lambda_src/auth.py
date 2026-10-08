@@ -2495,11 +2495,30 @@ def _claim_review(token: str, body: dict[str, Any], origin: str | None) -> dict[
     # or on the settlement form. What has gone is a reviewer being unable to
     # say yes to a bill they have read.
 
+    # What the approval released.
+    #
+    # The engine reimburses nothing while a finding blocks a claim - that is
+    # what blocking means - so a reviewer approving past one is the only
+    # source of the figure. Reading `reimbursable_total` alone stores zero,
+    # and a claim worth zero is dropped by `payableClaims`: Mobil80-Exp-89 was
+    # approved for INR 1,999.00, stored as 0, and disappeared from Pending
+    # settlement while the submitter went on seeing it listed as awaiting
+    # payment. Money nobody would ever pay, invisible to the person who pays.
+    #
+    # `provisional_total` was the fallback and this verdict had none, so it
+    # fell through to "0". `receipt_total` is the figure that is always there
+    # and is what the reviewer was looking at when they said yes.
+    #
+    # Computed once. The notice sent to the submitter already carried this
+    # same fallback of its own, so the message said INR 1,999.00 while the
+    # row said 0 - one function giving two answers to one question.
     approved_total = ""
     if action == "approved":
-        approved_total = str(verdict.get("reimbursable_total") or "0")
-        if _as_decimal(approved_total) <= 0:
-            approved_total = str(verdict.get("provisional_total") or "0")
+        for candidate in ("reimbursable_total", "provisional_total",
+                          "receipt_total"):
+            approved_total = str(verdict.get(candidate) or "0")
+            if _as_decimal(approved_total) > 0:
+                break
 
     sets = ("SET review_action = :a, review_reason = :r, review_by = :b, "
             "review_by_name = :n, review_at = :t, approved_total = :amt")
@@ -2553,16 +2572,14 @@ def _claim_review(token: str, body: dict[str, Any], origin: str | None) -> dict[
                 "currency": verdict.get("currency", ""),
             }
             if action == "approved":
-                # What the reviewer released, not the engine's figure - which
-                # is nothing while a finding blocks the claim, and a claim in
-                # front of a reviewer is usually blocked by one.
-                # `or` is not enough: `approved_total` is a string, and the
-                # string "0" is truthy - a claim whose engine figures were
-                # both nothing would be announced as approved for 0.00.
-                released = approved_total
-                if _as_decimal(released) <= 0:
-                    released = str(verdict.get("receipt_total") or "")
-                claim.update({"approved": released, "approved_by": decided_by})
+                # The figure that was stored, not a second derivation of it.
+                # This carried its own fallback to `receipt_total` while the
+                # stored value did not, so the submitter was told INR 1,999.00
+                # about a claim the database recorded as worth nothing. The
+                # fallback belongs where the figure is decided, above, and now
+                # lives there alone.
+                claim.update({"approved": approved_total,
+                              "approved_by": decided_by})
             else:
                 claim.update({
                     "approved": verdict.get("provisional_total")

@@ -88,13 +88,22 @@ class TheReviewPathSendsIt(unittest.TestCase):
         self.assertNotIn("withdrawn", block)
         self.assertNotIn("reopened", block)
 
-    def test_the_figure_sent_is_what_the_reviewer_released(self):
-        # `approved_total` is a string, and "0" is truthy - a plain `or` would
-        # announce a claim as approved for 0.00.
+    def test_the_figure_sent_is_the_one_that_was_stored(self):
+        """Not a second derivation of it.
+
+        This carried its own fallback to `receipt_total` while the stored
+        `approved_total` did not, so Mobil80-Exp-89 told its submitter INR
+        1,999.00 about a claim the database recorded as worth nothing. One
+        function, two answers to one question.
+
+        The fallback belongs where the figure is decided, and lives there
+        alone now.
+        """
         block = self.auth.split('if action in ("approved", "rejected"):', 1)[1] \
                          .split("return _reply(", 1)[0]
-        self.assertIn("released = approved_total", block)
-        self.assertIn("if _as_decimal(released) <= 0:", block)
+        self.assertIn('claim.update({"approved": approved_total,', block)
+        self.assertNotIn("released = approved_total", block)
+        self.assertNotIn('released = str(verdict.get("receipt_total")', block)
 
 
 class WhatsAppDeliveryIsHonestAboutItsWindow(unittest.TestCase):
