@@ -860,3 +860,51 @@ class TheHoldersOwnTabAsksTheSameQuestions(unittest.TestCase):
         # bar that needs somebody to do something.
         self.assertLess(self.fn.index("More has been settled against your float"),
                         self.fn.index("of your claims are spent but not yet settled"))
+
+
+class AFloatThatWasHandedBackIsClosed(unittest.TestCase):
+    """Riyad held none of the company's cash and was listed as holding it.
+
+    Holders are derived from the ledger - "somebody holds a float because cash
+    was handed to them, not because a box was ticked" - which is right, and it
+    had no ending. He was advanced 1,500 on 23 September and handed it back
+    the same hour, and stayed on the list of people holding the company's cash
+    ever after.
+
+    Untidy rather than wrong, except for what it did to `in_hand`. `pending`
+    counts every unsettled claim a person has submitted, because until finance
+    settles one nobody has said whether it comes off the float or is paid
+    separately. For somebody with a float that is a worst case worth seeing.
+    For somebody with no float it is just their expense claims subtracted from
+    zero - so two ordinary receipts showed him 32,189.62 overdrawn on cash he
+    does not have, in amber, on a tab he had no reason to be on.
+    """
+
+    def setUp(self):
+        self.view = read("lambda_src/auth.py").split(
+            "def _advances_view(", 1)[1].split("\ndef ", 1)[0]
+
+    def test_a_float_with_nothing_out_and_nothing_drawn_is_dropped(self):
+        self.assertIn('if out == 0 and who["from_float"] == 0:', self.view)
+        self.assertIn("continue", self.view.split(
+            'if out == 0 and who["from_float"] == 0:', 1)[1][:40])
+
+    def test_but_somebody_who_spent_their_advance_keeps_their_row(self):
+        # Their balance is zero too, and `from_float` is where the money went
+        # - the row is the record of it.
+        self.assertIn('who["from_float"] == 0', self.view)
+
+    def test_the_in_flight_rows_of_a_closed_float_go_with_it(self):
+        # Drawn from claims rather than the cash ledger, they exist to make a
+        # holder's `in flight` figure traceable. With no holder they are a
+        # person's ordinary receipts listed under Advances, which is the
+        # confusion being removed rather than a second copy of it.
+        self.assertIn('shown = {p["email"] for p in people}', self.view)
+        self.assertIn('if r["kind"] != "in_flight" or r["holder"] in shown',
+                      self.view)
+
+    def test_the_cash_movements_stay_whatever_happens(self):
+        # An advance and a hand-back are real movements of the company's cash
+        # and the ledger is the record of them.
+        rows = self.view.split("ledger = sorted(", 1)[1]
+        self.assertIn('"kind": str(r.get("kind") or "advance")', rows)

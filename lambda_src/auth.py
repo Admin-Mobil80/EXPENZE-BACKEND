@@ -1023,6 +1023,29 @@ def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict
     people = []
     for who in holders.values():
         out = who["advanced"] - who["returned"] - who["from_float"]
+        # Nothing advanced, nothing drawn against it: this float is closed.
+        #
+        # Holders are derived from the ledger - "somebody holds a float
+        # because cash was handed to them, not because a box was ticked" -
+        # which is right, and it has no ending. Riyad was advanced 1,500 on
+        # 23 September and handed it back the same hour, and stayed on the
+        # list of "people holding the company's cash" ever after, holding
+        # none of it.
+        #
+        # That would be untidy rather than wrong, except for what it does to
+        # `in_hand`: `pending` counts every unsettled claim a person has
+        # submitted, because until finance settles one nobody has said
+        # whether it comes off the float or is paid separately. For somebody
+        # with a float that is a worst case worth seeing. For somebody with
+        # no float it is just their expense claims, subtracted from zero - so
+        # two ordinary receipts showed him 32,189.62 overdrawn on cash he does
+        # not have.
+        #
+        # `from_float` is the half that keeps history: somebody who spent
+        # their whole advance on claims settled against it has a balance of
+        # zero too, and their row is the record of where the money went.
+        if out == 0 and who["from_float"] == 0:
+            continue
         people.append({
             "email": who["email"],
             "name": who["name"],
@@ -1042,6 +1065,18 @@ def _advances_view(token: str, body: dict[str, Any], origin: str | None) -> dict
             "movements": who["movements"],
         })
     people.sort(key=lambda p: _as_decimal(p["held"]))
+
+    # The in-flight rows of a float that is closed go with it.
+    #
+    # They are drawn from claims rather than from the cash ledger, and they
+    # exist to make a holder's `in flight` figure traceable. With no holder
+    # they are a person's ordinary receipts listed under Advances, which is
+    # the confusion this is removing rather than a second copy of it. The
+    # advance and the hand-back stay: those are real movements of the
+    # company's cash and the ledger is the record of them.
+    shown = {p["email"] for p in people}
+    spends = [r for r in spends
+              if r["kind"] != "in_flight" or r["holder"] in shown]
 
     # Narrowed here, at the end, so both readers are answered by the same
     # arithmetic. A submitter sees one holder - themselves - or none, which
