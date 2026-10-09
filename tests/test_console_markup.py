@@ -455,10 +455,12 @@ class MyExpensesOpensOnWhatItIsFor(unittest.TestCase):
         self.assertIn("renderMine();", mine)
 
     def test_the_figures_are_still_worked_out_for_the_budgets_page(self):
-        # `budgetLines` is what fills the "used" column beside each limit.
+        # `spendByType` fills the "used" column beside each limit;
+        # `budgetLines` still answers the watchlist's question about limits.
         self.assertIn("function budgetLines(person) {", self.app)
+        self.assertIn("function spendByType(person) {", self.app)
         editor = self.app.split("// ---- editor ----", 1)[1]
-        self.assertIn("const spend = person ? budgetLines(person) : null;", editor)
+        self.assertIn("const spend = person ? spendByType(person) : null;", editor)
 
 
 class MyExpensesLeadsSomewhere(unittest.TestCase):

@@ -199,3 +199,65 @@ class TheFormOnlyEverShowsWhatThisScopeSet(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheUsedColumnAnswersForEveryRow(unittest.TestCase):
+    """"₹0.00 used" on some rows and nothing on others, meaning two things.
+
+    The editor took its figures from `budgetLines`, which answers a different
+    question - how is this person doing against their limits - and builds a
+    line only for a type that *has* a limit somewhere. So the column was
+    filled against Meals and Courier and blank against Computer Peripherals,
+    and the blank did not mean nothing was spent. It meant there was no line
+    to look the figure up in. On this account one of those blanks was hiding
+    real spend.
+
+    Which is the wrong way round for that screen. Somebody deciding whether a
+    scope needs its own limit needs to know what it spends, and the rows with
+    no limit yet are exactly the ones where that is the open question. The
+    blanks were on the only rows anybody was there to think about.
+    """
+
+    def setUp(self):
+        with open(os.path.join(os.path.dirname(__file__), "..",
+                               "..", "PORTAL", "app.html"), encoding="utf-8") as h:
+            self.app = h.read()
+        self.fn = self.app.split("function spendByType(person) {", 1)[1].split(
+            "\n}", 1)[0]
+
+    def test_spend_is_asked_on_its_own_terms(self):
+        # Of every type the person submitted against, not of the types that
+        # happen to be capped.
+        self.assertIn("mine.forEach(s => {", self.fn)
+        self.assertIn("types[id] = (types[id] || 0) + amount(s);", self.fn)
+
+    def test_the_editor_reads_it_rather_than_the_limit_lines(self):
+        editor = self.app.split("// ---- editor ----", 1)[1]
+        self.assertIn("const spend = person ? spendByType(person) : null;", editor)
+        self.assertNotIn("spend.lines.find", self.app)
+
+    def test_a_row_with_no_spend_reads_nought_rather_than_blank(self):
+        # A nought is an answer; a blank is a question about the product.
+        self.assertIn("(spend.types[row.id] || 0)", self.app)
+        self.assertIn('used.textContent = amount === null ? "" '
+                      ': `${fmt(amount, spend.ccy)} used`;', self.app)
+
+    def test_and_the_total_row_still_totals(self):
+        self.assertIn('row.id === "__total" ? spend.total', self.app)
+
+    def test_the_currency_handling_matches_the_budget_arithmetic(self):
+        # Converted where the server could, face value where it could not -
+        # otherwise this column and the limit beside it count differently.
+        self.assertIn("const converted = budgetValue(s);", self.fn)
+        self.assertIn("converted === null ? evaluate(s).receiptTotal : converted",
+                      self.fn)
+
+    def test_and_what_could_not_be_converted_is_still_reported(self):
+        self.assertIn("other: subs.length - mine.length", self.fn)
+        self.assertIn("converted: mine.filter(s => budgetValue(s) !== null).length",
+                      self.fn)
+
+    def test_the_watchlist_still_asks_the_limit_question(self):
+        # `budgetLines` is about statuses against caps and stays as it was.
+        self.assertIn("function budgetLines(person) {", self.app)
+        self.assertIn("return PEOPLE.map(budgetLines).filter(Boolean)", self.app)
