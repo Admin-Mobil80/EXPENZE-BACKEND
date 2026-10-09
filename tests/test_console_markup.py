@@ -458,9 +458,9 @@ class MyExpensesOpensOnWhatItIsFor(unittest.TestCase):
         # `spendByType` fills the "used" column beside each limit;
         # `budgetLines` still answers the watchlist's question about limits.
         self.assertIn("function budgetLines(person) {", self.app)
-        self.assertIn("function spendByType(person) {", self.app)
+        self.assertIn("function spendIn(belongs) {", self.app)
         editor = self.app.split("// ---- editor ----", 1)[1]
-        self.assertIn("const spend = person ? spendByType(person) : null;", editor)
+        self.assertIn("const spend = spendForScope(budScope, person);", editor)
 
 
 class MyExpensesLeadsSomewhere(unittest.TestCase):

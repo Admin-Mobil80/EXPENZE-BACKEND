@@ -222,7 +222,7 @@ class TheUsedColumnAnswersForEveryRow(unittest.TestCase):
         with open(os.path.join(os.path.dirname(__file__), "..",
                                "..", "PORTAL", "app.html"), encoding="utf-8") as h:
             self.app = h.read()
-        self.fn = self.app.split("function spendByType(person) {", 1)[1].split(
+        self.fn = self.app.split("function spendIn(belongs) {", 1)[1].split(
             "\n}", 1)[0]
 
     def test_spend_is_asked_on_its_own_terms(self):
@@ -233,8 +233,41 @@ class TheUsedColumnAnswersForEveryRow(unittest.TestCase):
 
     def test_the_editor_reads_it_rather_than_the_limit_lines(self):
         editor = self.app.split("// ---- editor ----", 1)[1]
-        self.assertIn("const spend = person ? spendByType(person) : null;", editor)
+        self.assertIn("const spend = spendForScope(budScope, person);", editor)
         self.assertNotIn("spend.lines.find", self.app)
+
+    def test_all_three_scopes_are_answered(self):
+        """The organisation's and a group's spend were simply absent.
+
+        A column of nothing reads as "this product does not know" rather than
+        as an answer - and those are the two scopes where a limit is most
+        often set first, so the figure that decides what to set it to was on
+        the one tab that already had it.
+        """
+        fn = self.app.split("function spendForScope(scope, person) {", 1)[1] \
+                     .split("\n}", 1)[0]
+        self.assertIn('if (scope === "org") return spendIn(() => true);', fn)
+        self.assertIn("spendIn(s => groupOf(s).id === gid)", fn)
+        self.assertIn("spendIn(s => s.who === person.name)", fn)
+
+    def test_a_group_is_asked_the_same_way_the_reports_ask_it(self):
+        # `groupOf` is the attribution, inferred or set; reading `sub.groupId`
+        # directly would miss everything the agent worked out from the bill.
+        fn = self.app.split("function spendForScope(scope, person) {", 1)[1] \
+                     .split("\n}", 1)[0]
+        self.assertIn("groupOf(s).id", fn)
+
+    def test_one_arithmetic_for_all_three(self):
+        # Three copies is two of them eventually counting something the third
+        # does not.
+        self.assertEqual(1, self.app.count("function spendIn(belongs) {"))
+
+    def test_a_second_document_is_not_a_second_spend(self):
+        # An invoice and its receipt arriving together are one purchase.
+        # Counting both is the bug that had Reports disagreeing with the
+        # payment run and the float reporting money outstanding with nothing
+        # pending.
+        self.assertIn("claimsOnly(SUBMISSIONS)", self.fn)
 
     def test_a_row_with_no_spend_reads_nought_rather_than_blank(self):
         # A nought is an answer; a blank is a question about the product.
