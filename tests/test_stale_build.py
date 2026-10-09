@@ -91,3 +91,98 @@ class TheConsoleNoticesItIsOld(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheServerMovingIsADifferentFactFromThePageMoving(unittest.TestCase):
+    """The page's own ETag says nothing about the API.
+
+    `checkBuild` catches "you are running yesterday's JavaScript". A backend
+    deploy leaves a page that is genuinely current holding data that silently
+    is not - the float figures, a budget total, a claim's stage - with no
+    prompt either way. The only reliable move was a hard refresh of something
+    that did not need refreshing, which is what somebody actually did.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as h:
+            self.app = h.read()
+        with open(os.path.join(ROOT, "lambda_src/auth.py"), encoding="utf-8") as h:
+            self.auth = h.read()
+        with open(os.path.join(ROOT, "expensifyai/stack.py"), encoding="utf-8") as h:
+            self.stack = h.read()
+
+    def test_every_answer_carries_the_build_that_produced_it(self):
+        # On the reply rather than in the body: every endpoint goes through
+        # `_reply`, so there is one place to set it and nothing added to a
+        # payload shape callers parse.
+        self.assertIn('headers["X-Expenze-Build"] = BUILD_ID', self.auth)
+        self.assertIn('BUILD_ID = os.environ.get("BUILD_ID", "")', self.auth)
+
+    def test_an_unset_build_sends_no_header_at_all(self):
+        # Rather than an empty one, which the console would have to special
+        # case into meaning nothing.
+        self.assertIn("if BUILD_ID:", self.auth)
+
+    def test_the_browser_is_allowed_to_read_it(self):
+        # A response header is invisible to cross-origin JavaScript unless it
+        # is named here, and the console is served from a different origin -
+        # so the header would arrive, be dropped, and the check would silently
+        # never fire.
+        self.assertIn('"Access-Control-Expose-Headers": "X-Expenze-Build"', self.auth)
+
+    def test_the_build_changes_when_the_code_does_and_not_otherwise(self):
+        # A deploy that alters a table's throughput must not tell everybody
+        # their figures are stale, and two deploys of identical code agree.
+        self.assertIn("def _build_id(", self.stack)
+        self.assertIn('"BUILD_ID": API_BUILD,', self.stack)
+        fn = self.stack.split("def _build_id(", 1)[1].split("\nAPI_BUILD", 1)[0]
+        self.assertIn("hashlib.sha256()", fn)
+        self.assertIn("sorted(root.rglob", fn)       # not filesystem order
+        self.assertIn("path.relative_to(root)", fn)  # a deletion registers
+        self.assertIn('suffix == ".pyc"', fn)        # a stale cache is not a release
+
+    def test_the_console_notes_it_on_every_call(self):
+        call = self.app.split("async function authCall(", 1)[1].split("\n}", 1)[0]
+        self.assertIn('noteApiBuild(res.headers.get("X-Expenze-Build"));', call)
+
+    def test_the_first_build_seen_is_a_baseline_not_a_change(self):
+        # Otherwise every console announces itself as stale on its first call.
+        fn = self.app.split("function noteApiBuild(build) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("if (!apiBuild) { apiBuild = build; return; }", fn)
+
+    def test_a_missing_header_says_nothing(self):
+        fn = self.app.split("function noteApiBuild(build) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("if (!build) return;", fn)
+
+    def test_the_two_reasons_ask_for_different_things(self):
+        """A new page has to be fetched. New data behind the same page does not.
+
+        Telling somebody to reload when a refresh would do is how a product
+        teaches people to hard-refresh at every surprise - which is what was
+        happening, because nothing said which kind of change had shipped.
+        """
+        fn = self.app.split("function paintStaleBuild() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("const pageMoved = !!latestBuild && latestBuild !== loadedBuild;",
+                      fn)
+        self.assertIn('act.textContent = pageMoved ? "Reload" : "Refresh"', fn)
+        self.assertIn("The server has been updated.", fn)
+
+    def test_and_the_button_does_whichever_it_is(self):
+        act = self.app.split('$("stale-reload").addEventListener("click", () => {',
+                             1)[1].split("});", 1)[0]
+        self.assertIn("if (latestBuild && latestBuild !== loadedBuild) return location.reload();",
+                      act)
+        self.assertIn("refreshNow();", act)
+
+    def test_dismissing_one_does_not_silence_the_other(self):
+        act = self.app.split('$("stale-dismiss").addEventListener("click", () => {',
+                             1)[1].split("});", 1)[0]
+        self.assertIn("dismissedBuild = latestBuild;", act)
+        self.assertIn("apiBuildDismissed = apiBuildLatest;", act)
+
+    def test_a_refresh_moves_the_baseline_on(self):
+        # Otherwise the bar comes straight back after the refresh that
+        # answered it.
+        act = self.app.split('$("stale-reload").addEventListener("click", () => {',
+                             1)[1].split("});", 1)[0]
+        self.assertIn("apiBuild = apiBuildLatest || apiBuild;", act)

@@ -8,6 +8,40 @@ a dedicated AWS account later with only a redeploy.
 """
 from __future__ import annotations
 
+import hashlib
+import pathlib
+
+
+def _build_id(directory: str = "lambda_src") -> str:
+    """A short identifier that changes exactly when the handler code changes.
+
+    The console compares it across responses to notice that the server has
+    moved under a page that is still running fine. It has to change on a code
+    deploy and *not* change on anything else: a deploy that alters a table's
+    throughput should not tell everybody their figures are stale, and two
+    deploys of identical code should agree.
+
+    So it is a hash of the source CDK is about to ship, which is the same
+    thing the asset hash is derived from - computed here rather than read off
+    the asset because the asset hash is only resolved at synth time and this
+    is needed as a plain environment variable.
+
+    Sorted, so the walk order of a filesystem does not change the answer.
+    Names included, so deleting a file registers. `.pyc` left out, because a
+    stale cache directory is not a release.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent / directory
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix == ".pyc" or "__pycache__" in path.parts:
+            continue
+        digest.update(str(path.relative_to(root)).encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+API_BUILD = _build_id()
+
 from aws_cdk import (
     Aws,
     CfnOutput,
@@ -545,6 +579,9 @@ class ExpensifyAIStack(Stack):
                 "OTP_SENDER": otp_sender,
                 "SESSION_SECRET_ARN": session_secret.secret_arn,
                 "ALLOWED_ORIGINS": ",".join(site_origins),
+                # What the console compares to notice the server has moved
+                # under a page that is otherwise running fine.
+                "BUILD_ID": API_BUILD,
             },
         )
         auth_table.grant_read_write_data(auth_fn)

@@ -3909,6 +3909,12 @@ def _cors(origin: str | None) -> dict[str, str]:
         "Access-Control-Allow-Origin": allow,
         "Access-Control-Allow-Headers": "Content-Type,Authorization",
         "Access-Control-Allow-Methods": "POST,OPTIONS",
+        # Without this the console cannot read the build header at all.
+        # A response header is invisible to cross-origin JavaScript unless it
+        # is named here, and the console is served from a different origin to
+        # the API - so the header would arrive, be dropped by the browser, and
+        # the check would silently never fire.
+        "Access-Control-Expose-Headers": "X-Expenze-Build",
         "Vary": "Origin",
     }
 
@@ -3938,10 +3944,31 @@ def _jsonable(value: Any) -> Any:
     raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
 
 
+# Which build of this handler is answering, set at deploy time from a hash of
+# the source. Empty when it is not set, which is honest: the console treats a
+# missing header as "no answer" rather than as a change.
+BUILD_ID = os.environ.get("BUILD_ID", "")
+
+
 def _reply(status: int, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
+    """Every answer carries which build produced it.
+
+    The console already notices when *it* is out of date - it watches its own
+    page's ETag - and that says nothing about the server. A backend deploy
+    leaves a page that is genuinely current holding data that silently is not,
+    with no prompt either way, so the only reliable move was a hard refresh of
+    something that did not need refreshing.
+
+    On the reply rather than in the body: every endpoint goes through here, so
+    there is one place to set it and nothing to add to a payload shape that
+    callers parse.
+    """
+    headers = {"Content-Type": "application/json", **_cors(origin)}
+    if BUILD_ID:
+        headers["X-Expenze-Build"] = BUILD_ID
     return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json", **_cors(origin)},
+        "headers": headers,
         "body": json.dumps(body, default=_jsonable),
     }
 
