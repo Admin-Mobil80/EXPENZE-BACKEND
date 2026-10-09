@@ -4029,7 +4029,7 @@ class SpendByPerson(unittest.TestCase):
     def test_only_people_who_submitted_appear(self):
         # The People tab is the roll. Forty rows of zero would bury the handful
         # who spent anything.
-        self.assertIn("rows.forEach(r => {", self.block)
+        self.assertIn("live.forEach(r => {", self.block)
         self.assertNotIn("PEOPLE.forEach", self.block)
 
     def test_somebody_since_removed_is_still_who_spent_the_money(self):
@@ -4321,7 +4321,7 @@ class EveryReportCountsOneCurrency(unittest.TestCase):
     def test_a_rejected_claim_is_in_none_of_them(self):
         # It is not money the company owes, so it is out of Claimed too - or
         # the row would never add up and the reader would hunt for the gap.
-        self.assertIn('const live = rows.filter(r => !["rejected", "withdrawn"].includes(r.stage));',
+        self.assertIn('const owedRows = (rows) => rows.filter(r => !LIVE_STAGES_OUT.includes(r.stage));',
                       self.app)
 
     def test_the_headline_shows_the_split(self):
@@ -4381,7 +4381,7 @@ class WaitingIsTwoDifferentWaits(unittest.TestCase):
     def setUp(self):
         with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as handle:
             self.app = handle.read()
-        self.block = self.app.split("const live = rows.filter(", 1)[1] \
+        self.block = self.app.split("const live = owedRows(rows);", 1)[1] \
                               .split('$("rp-reimb")', 1)[0]
 
     def test_the_two_waits_are_counted_apart(self):
@@ -4719,3 +4719,64 @@ class OneFailedRefreshIsNotTheLastOne(unittest.TestCase):
         self.assertIn('classList.toggle("offline"', paint)
         self.assertIn(".btn.refresh.offline {", self.app)
         self.assertIn(".btn.refresh.stale {", self.app)
+
+
+class EveryBreakdownSumsToTheHeadlineAboveIt(unittest.TestCase):
+    """The tiles excluded refused claims. The five tables under them did not.
+
+    `Claimed` has meant "money the company owes" for as long as it has been
+    on the page - a rejected claim is the company deciding it is not paying
+    that, a withdrawn one is the submitter saying it was never a claim - and
+    the headline said so. Every breakdown beneath walked the unfiltered list,
+    so By expense type, By group, By user, By month and Where money goes each
+    added up to more than the figure above them. On this account in October
+    that was INR 77,529.19 against a headline of INR 57,099.19.
+
+    A drill-down that does not sum to its own summary sends the reader
+    hunting for a difference nobody put there on purpose - and the two types
+    carrying it, `not_covered` and `software_subscription`, are exactly the
+    ones somebody would open the report to ask about.
+
+    Named once rather than written out at each of the five, which is how the
+    five came to disagree with the one.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as h:
+            self.app = h.read()
+        self.fn = self.app.split("function renderReports() {", 1)[1].split(
+            "\nfunction ", 1)[0]
+
+    def test_the_rule_has_a_name(self):
+        self.assertIn('const LIVE_STAGES_OUT = ["rejected", "withdrawn"];', self.app)
+        self.assertIn("const owedRows = (rows) => rows.filter(r => "
+                      "!LIVE_STAGES_OUT.includes(r.stage));", self.app)
+
+    def test_the_headline_uses_it(self):
+        self.assertIn("const live = owedRows(rows);", self.fn)
+
+    def test_and_so_does_every_table_under_it(self):
+        for section, marker in (
+                ("by expense type", "const all = live.filter(r => r.type === t);"),
+                ("by group", "live.forEach(r => {\n    const g = groupOf(r.sub);"),
+                ("by user", "live.forEach(r => {\n    const who = String("),
+                ("where the money goes", "live.forEach(r => {\n    const k = r.type")):
+            self.assertIn(marker, self.fn, section)
+
+    def test_the_type_list_itself_is_drawn_from_the_same_set(self):
+        # Otherwise a type whose only claims were all rejected keeps a row
+        # that sums to nothing.
+        self.assertIn("const types = [...new Set(live.map(r => r.type))];", self.fn)
+
+    def test_by_month_counts_the_same_way(self):
+        # It is a separate function and was the fifth place to disagree.
+        fn = self.app.split("function renderByMonth() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("owedRows(analysed().filter(r => yearOf(r.sub) === year))", fn)
+
+    def test_nothing_in_reports_still_walks_the_unfiltered_list_for_money(self):
+        # `rows` survives for the receipt count and the unconvertible note,
+        # which are about what arrived rather than what is owed.
+        for stale in ("const all = rows.filter(r => r.type === t);",
+                      "rows.forEach(r => {\n    const g = groupOf(r.sub);",
+                      "rows.forEach(r => {\n    const who = String("):
+            self.assertNotIn(stale, self.fn, stale)
