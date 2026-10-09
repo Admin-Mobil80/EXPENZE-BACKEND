@@ -262,6 +262,28 @@ class TheUsedColumnAnswersForEveryRow(unittest.TestCase):
         # does not.
         self.assertEqual(1, self.app.count("function spendIn(belongs) {"))
 
+    def test_what_the_company_refused_is_not_spend(self):
+        """A rejected claim is the company deciding it is not spending that.
+
+        A withdrawn one is the submitter saying it was never a claim at all.
+        Both were eating into a limit nothing would ever be paid out of, which
+        makes a budget read as fuller than it is and sends somebody looking
+        for a conversation about money that is not going anywhere.
+
+        Settled is not in the list, obviously, and neither is anything in
+        review or waiting to be paid: a limit nobody notices until the payment
+        run is a limit that has already been passed.
+        """
+        self.assertIn('const spent = (sub) => !["rejected", "withdrawn"]'
+                      '.includes(claimStage(sub).stage);', self.fn)
+        self.assertIn("&& spent(s) &&", self.fn)
+
+    def test_and_the_banner_says_which_way_it_counts(self):
+        # It said "everything submitted in the period", which stopped being
+        # true the moment two of the endings came out.
+        self.assertIn("Rejected and withdrawn claims are not counted.", self.app)
+        self.assertIn("in review, waiting to be paid, and settled", self.app)
+
     def test_a_second_document_is_not_a_second_spend(self):
         # An invoice and its receipt arriving together are one purchase.
         # Counting both is the bug that had Reports disagreeing with the
