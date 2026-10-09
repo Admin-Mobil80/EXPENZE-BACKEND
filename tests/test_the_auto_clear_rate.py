@@ -55,12 +55,43 @@ class OneDefinition(unittest.TestCase):
                       self.app)
 
     def test_and_the_rate_is_that_predicate_over_the_rows(self):
-        fn = self.app.split("const autoClearRate = (subs) =>", 1)[1].split(";", 1)[0]
-        self.assertIn("subs.filter(autoCleared).length / subs.length", fn)
+        fn = self.app.split("const autoClearRate = (subs) => {", 1)[1].split(
+            "\n};", 1)[0]
+        self.assertIn("real.filter(autoCleared).length / real.length", fn)
 
     def test_an_empty_period_is_not_a_division_by_zero(self):
-        fn = self.app.split("const autoClearRate = (subs) =>", 1)[1].split(";", 1)[0]
-        self.assertIn("subs.length ?", fn)
+        fn = self.app.split("const autoClearRate = (subs) => {", 1)[1].split(
+            "\n};", 1)[0]
+        self.assertIn("real.length", fn)
+
+    def test_the_denominator_is_the_claims_that_turned_out_to_be_real(self):
+        """A refused or withdrawn claim was in it.
+
+        The argument for keeping it there was that a claim a reviewer rejected
+        is work a human did, so dropping it flatters the agent - true of a
+        rejection, which is a judgment somebody had to make, and not of a
+        withdrawal, which the submitter took back before anybody judged
+        anything. And the wrong frame for both: the rate answers "how much of
+        the real work does the agent take off a person", and a claim nobody is
+        being paid for was not work. The duplicate the agent flagged and a
+        reviewer killed is the system doing its job, counted as a failure.
+        """
+        fn = self.app.split("const autoClearRate = (subs) => {", 1)[1].split(
+            "\n};", 1)[0]
+        self.assertIn("!LIVE_STAGES_OUT.includes(claimStage(s).stage)", fn)
+
+    def test_it_is_the_same_pair_the_money_figures_exclude(self):
+        # One answer on the page to "which claims count".
+        self.assertIn('const LIVE_STAGES_OUT = ["rejected", "withdrawn"];', self.app)
+
+    def test_the_counts_beside_it_are_not_narrowed(self):
+        # "Decided by you" is the human work done, and a rejection is some of
+        # the most deliberate of it. Narrowing the list in `renderTriage`
+        # would take those decisions out of the count that exists to show them.
+        triage = self.app.split("function renderTriage() {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("const rate = autoClearRate(period);", triage)
+        self.assertIn("const cleared = period.filter(autoCleared).length;", triage)
 
     def test_the_cleared_stage_reading_is_gone_from_everywhere(self):
         # The one that called a human's approval an automatic clearance. It
