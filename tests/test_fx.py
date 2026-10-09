@@ -189,14 +189,19 @@ class TheConsoleCountsConvertedSpend(unittest.TestCase):
             self.app = handle.read()
 
     def test_a_foreign_claim_is_no_longer_dropped(self):
-        lines = self.app.split("function budgetLines(", 1)[1].split("\nfunction ", 1)[0]
+        # The arithmetic moved into `spendIn`, which the editor and the
+        # watchlist now share - one count of a person's spend rather than two
+        # that could drift.
+        lines = self.app.split("function spendIn(belongs, over) {", 1)[1].split(
+            "\n}", 1)[0]
         self.assertIn("budgetValue(s) !== null", lines)
 
     def test_an_unconvertible_claim_is_not_counted_as_zero(self):
         fn = self.app.split("function budgetValue(", 1)[1].split("\nfunction ", 1)[0]
         self.assertIn("return null;", fn)
         # And the caller has to act on that rather than adding it.
-        lines = self.app.split("function budgetLines(", 1)[1].split("\nfunction ", 1)[0]
+        lines = self.app.split("function spendIn(belongs, over) {", 1)[1].split(
+            "\n}", 1)[0]
         self.assertIn("converted === null", lines)
 
     def test_the_conversion_is_admitted_where_the_figure_is_read(self):

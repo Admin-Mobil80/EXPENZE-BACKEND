@@ -222,7 +222,7 @@ class TheUsedColumnAnswersForEveryRow(unittest.TestCase):
         with open(os.path.join(os.path.dirname(__file__), "..",
                                "..", "PORTAL", "app.html"), encoding="utf-8") as h:
             self.app = h.read()
-        self.fn = self.app.split("function spendIn(belongs) {", 1)[1].split(
+        self.fn = self.app.split("function spendIn(belongs, over) {", 1)[1].split(
             "\n}", 1)[0]
 
     def test_spend_is_asked_on_its_own_terms(self):
@@ -257,10 +257,38 @@ class TheUsedColumnAnswersForEveryRow(unittest.TestCase):
                      .split("\n}", 1)[0]
         self.assertIn("groupOf(s).id", fn)
 
-    def test_one_arithmetic_for_all_three(self):
-        # Three copies is two of them eventually counting something the third
-        # does not.
-        self.assertEqual(1, self.app.count("function spendIn(belongs) {"))
+    def test_one_arithmetic_for_all_four(self):
+        """Three scopes in the editor, and the watchlist behind them.
+
+        `budgetLines` kept its own count of a person's spend, with no
+        exclusions at all - so the watchlist and the two "over budget" badges
+        saw a refused claim, a withdrawn one and a companion document while
+        the editor beside them saw none of the three. The same person could
+        read as over on the watchlist and under on the row you opened to look
+        at it.
+        """
+        self.assertEqual(1, self.app.count("function spendIn(belongs, over) {"))
+        lines = self.app.split("function budgetLines(person) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("const spend = spendIn(s => s.who === person.name, b.period);",
+                      lines)
+        self.assertNotIn("submittedBy(", lines)
+
+    def test_a_personal_period_is_still_the_window_it_is_measured_over(self):
+        # Somebody can be measured weekly while the organisation is monthly,
+        # so the caller says which window it is asking about.
+        fn = self.app.split("function spendIn(belongs, over) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn('const period = over || (ORG_PROFILE.budgets || {}).period',
+                      fn)
+
+    def test_budget_for_still_answers_the_other_half(self):
+        # What the limits are and which level each came from, which is the
+        # question `budgetLines` is actually for.
+        lines = self.app.split("function budgetLines(person) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn("const b = budgetFor(person);", lines)
+        self.assertIn("from:b.totalFrom", lines)
 
     def test_what_the_company_refused_is_not_spend(self):
         """A rejected claim is the company deciding it is not spending that.
