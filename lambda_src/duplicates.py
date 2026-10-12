@@ -169,6 +169,38 @@ _CONFUSABLE = str.maketrans({"o": "0", "i": "1", "l": "1", "s": "5",
                              "b": "8", "z": "2"})
 
 
+def invoice_token(invoice_number: str) -> str:
+    """One invoice number, as the fingerprint sees it.
+
+    Lifted out of `invoice_key` because a second reader had grown its own
+    normaliser and the two disagreed.
+
+    Mobil80-Exp-134 and Exp-135 are the invoice and the payment receipt for
+    one Gamma charge, forwarded in a single email. The number printed on both
+    came back as `OCBO7C05-0006` from one and `0CB07C05-0006` from the other -
+    letter O against digit zero, twice. The fingerprint folded them together,
+    which is how the two claims met at all. The companion check then compared
+    them with `taxlike`, which strips punctuation and uppercases and does not
+    fold anything, decided they were different documents, and left the receipt
+    standing as a separate claim flagged as a possible duplicate of its own
+    invoice.
+
+    So the check that decides "these are one purchase" was stricter than the
+    match that brought the pair together. Same question, one answer.
+
+    Empty when the number identifies nothing - under three characters, or
+    carrying no digit - and empty must never compare equal to empty: a bill
+    with no number proves nothing about another bill with no number.
+    """
+    number = _PUNCT.sub("", str(invoice_number or "").strip().lower())
+    # Checked before folding, not after. `o5o` folds to `050`, which would
+    # otherwise pass a digit test it should have failed - the point of that
+    # test is that a number with no digits on the paper identifies nothing.
+    if len(number) < 3 or not any(c.isdigit() for c in number):
+        return ""
+    return number.translate(_CONFUSABLE)
+
+
 def invoice_key(org_id: str, vendor: str, invoice_number: str) -> str:
     """The one duplicate signal that is not a guess.
 
@@ -189,17 +221,13 @@ def invoice_key(org_id: str, vendor: str, invoice_number: str) -> str:
     nothing printed on the paper at all.
     """
     vendor_part = _normalise_vendor(vendor)
-    number = _PUNCT.sub("", str(invoice_number or "").strip().lower())
-    # Checked before folding, not after. `o5o` folds to `050`, which would
-    # otherwise pass a digit test it should have failed - the point of that
-    # test is that a number with no digits on the paper identifies nothing.
-    #
     # A number that is a single character, or that is only the word "invoice"
     # with the digits lost, identifies nothing and would collide with every
-    # other unreadable one from that vendor.
-    if not vendor_part or len(number) < 3 or not any(c.isdigit() for c in number):
+    # other unreadable one from that vendor. `invoice_token` refuses those.
+    number = invoice_token(invoice_number)
+    if not vendor_part or not number:
         return ""
-    return f"{org_id}#invoice#{vendor_part}#{number.translate(_CONFUSABLE)}"
+    return f"{org_id}#invoice#{vendor_part}#{number}"
 
 
 def submitter_key(org_id: str, submitted_by: str, date: str,

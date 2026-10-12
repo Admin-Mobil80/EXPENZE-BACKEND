@@ -47,11 +47,41 @@ class ArrivingTogetherIsWhatSettlesIt(unittest.TestCase):
         self.assertIn("empty never equals empty", fn)
         self.assertIn("bool(this_invoice)", self.worker)
 
-    def test_the_number_is_compared_the_way_a_person_would(self):
-        # "4000 - 438350" and "4000-438350" are one number.
+    def test_the_number_is_compared_the_way_the_fingerprint_compares_it(self):
+        """Mobil80-Exp-134 and Exp-135: one Gamma charge, one email.
+
+        The invoice and its own payment receipt. The number printed on both
+        came back as `OCBO7C05-0006` from one and `0CB07C05-0006` from the
+        other - letter O against digit zero, twice. The fingerprint folds
+        characters printed the same shape, so it saw one number, which is how
+        the two claims met at all. This comparison stripped punctuation and
+        uppercased and stopped there, saw two, and left the receipt standing
+        as a separate claim flagged a possible duplicate of its own invoice.
+
+        The check that decides "these are one purchase" was stricter than the
+        match that brought the pair together. One answer now.
+        """
         fn = self.worker.split("def taxlike(", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn("ch.isalnum()", fn)
-        self.assertIn(".upper()", fn)
+        self.assertIn("duplicates.invoice_token(value).upper()", fn)
+        self.assertNotIn("ch.isalnum()", fn)
+
+    def test_and_that_normaliser_is_the_fingerprint_s_own(self):
+        # Lifted out of `invoice_key` rather than copied, so the two cannot
+        # drift again.
+        dup = src("lambda_src", "duplicates.py")
+        self.assertIn("def invoice_token(invoice_number: str) -> str:", dup)
+        key = dup.split("def invoice_key(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("number = invoice_token(invoice_number)", key)
+
+    def test_it_still_refuses_a_number_that_identifies_nothing(self):
+        # Under three characters, or carrying no digit. And the digit test
+        # runs before the folding, or `o5o` would pass a test it should fail.
+        dup = src("lambda_src", "duplicates.py")
+        fn = dup.split("def invoice_token(invoice_number: str) -> str:", 1)[1] \
+                .split("\ndef ", 1)[0]
+        self.assertIn("if len(number) < 3 or not any(c.isdigit() for c in number):",
+                      fn)
+        self.assertLess(fn.index("c.isdigit()"), fn.index("translate(_CONFUSABLE)"))
 
     def test_asking_which_fingerprint_matched_would_answer_the_weak_one(self):
         # `submitter_key` is tried first and is a guess: two colleagues each

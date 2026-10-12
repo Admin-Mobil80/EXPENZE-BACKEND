@@ -200,8 +200,19 @@ def taxlike(value: Any) -> str:
     `4000 - 438350` and `4000-438350` are one number; so are `AD2NTG1F-0004`
     and `ad2ntg1f 0004`. Empty stays empty, and empty never equals empty: a
     bill with no number proves nothing about another bill with no number.
+
+    This used to strip punctuation and uppercase and stop there, which made it
+    stricter than the fingerprint that brings two claims together: that folds
+    characters printed the same shape, so `OCBO7C05-0006` and `0CB07C05-0006`
+    are one number to it and were two to this. The companion check compares
+    with this function, so an invoice and its own receipt - one Gamma charge,
+    one email, two attachments - came out as two claims, the second flagged a
+    possible duplicate of the first.
+
+    `duplicates.invoice_token` is that same folding, and it is the only answer
+    to "is this the same number" now.
     """
-    return "".join(ch for ch in str(value or "") if ch.isalnum()).upper()
+    return duplicates.invoice_token(value).upper()
 
 
 def _invoice_of(submission_id: str) -> str:
