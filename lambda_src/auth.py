@@ -4420,6 +4420,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                    ("/whatsapp/add", "/whatsapp/verify", "/me", "/org", "/org/groups",
                     "/member/groups", "/member/transfer", "/member/reinvite", "/member",
                     "/org/budgets", "/org/rules",
+                    # Everything here is reached with a session rather than
+                    # an address: the email gate exists for the sign-in paths,
+                    # where the address *is* the request, and a path left out
+                    # of this list is refused for want of a field it never
+                    # uses. `/claims/sheet` was, and answered "enter a valid
+                    # email address" to a spreadsheet.
+                    "/claims/sheet",
                     "/claim/outcome", "/claim/settle-batch",
                     "/claim/review-batch", "/claim/retype-batch",
                     "/claim/review", "/claim/retype",
