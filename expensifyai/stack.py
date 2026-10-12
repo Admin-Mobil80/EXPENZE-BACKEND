@@ -1177,6 +1177,12 @@ class ExpensifyAIStack(Stack):
         # A reviewer saying what an expense actually is, when nothing in the
         # policy covers what the model read off the bill.
         claim_res.add_resource("retype").add_method("POST", auth_integration)
+        # Rows of a spreadsheet, as claims with no receipt behind them. Its
+        # own resource rather than one under `claim`, because `claim/*` acts
+        # on a claim that exists and this one makes them.
+        auth.add_resource("claims").add_resource("sheet").add_method(
+            "POST", auth_integration)
+
         member_res = auth.add_resource("member")
         member_res.add_method("POST", auth_integration)
         member_res.add_resource("groups").add_method("POST", auth_integration)
