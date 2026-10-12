@@ -843,7 +843,7 @@ class FinancePicksTheRowsGoingIntoThisTransfer(unittest.TestCase):
         self.assertIn("payAll.disabled = !mine.length;", self.fn)
 
     def test_and_says_how_to_give_it_something_to_do(self):
-        self.assertIn("Filter by submitter, or tick one row, to select a person's claims",
+        self.assertIn("Search for one person, or tick one row, to select a person's claims",
                       self.fn)
 
 
