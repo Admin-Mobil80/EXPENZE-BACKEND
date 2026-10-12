@@ -38,7 +38,13 @@ import re
 import secrets
 import time
 from concurrent import futures
-from decimal import Decimal
+# `InvalidOperation` is named in `_as_decimal`'s except clause and was never
+# imported, so the clause raised NameError while handling the very error it
+# exists to swallow - and `_as_decimal` propagated instead of returning zero,
+# which is the opposite of what its docstring promises. It never showed
+# because every caller fed it a number this product had written itself; the
+# spreadsheet upload is the first to hand it something a person typed.
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import boto3
@@ -3950,6 +3956,207 @@ def _jsonable(value: Any) -> Any:
 BUILD_ID = os.environ.get("BUILD_ID", "")
 
 
+SHEET_MAX_ROWS = 200
+
+
+def _sheet_row_error(row: dict[str, Any], types: set[str], groups: set[str],
+                     base: str) -> str:
+    """Why this line cannot become a claim, or "" when it can.
+
+    Checked before anything is written, all of them, so an upload of forty
+    lines with one bad date comes back naming that line rather than creating
+    thirty-nine claims and an error.
+    """
+    if not str(row.get("vendor") or "").strip():
+        return "no vendor"
+    day = str(row.get("date") or "").strip()[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        return "date must be YYYY-MM-DD"
+    try:
+        if time.strptime(day, "%Y-%m-%d").tm_year < 2000:
+            return "date is implausible"
+    except ValueError:
+        return "not a real date"
+    # Not in the future. A receipt cannot be for money not yet spent, and the
+    # commonest cause is a spreadsheet that reformatted the column.
+    if day > time.strftime("%Y-%m-%d", time.gmtime()):
+        return "date is in the future"
+    amount = _as_decimal(str(row.get("amount") or "").replace(",", ""))
+    if amount <= 0:
+        return "amount must be a positive number"
+    ccy = money.normalise(str(row.get("currency") or "")) or base
+    if not ccy:
+        return "currency is not one we recognise"
+    kind = str(row.get("expense_type") or "").strip()
+    if kind and kind not in types:
+        return f"'{kind}' is not one of your expense types"
+    group = str(row.get("group_id") or "").strip()
+    if group and group not in groups:
+        return f"'{group}' is not one of your cost centres"
+    return ""
+
+
+def _claims_from_sheet(token: str, body: dict[str, Any],
+                       origin: str | None) -> dict[str, Any]:
+    """Rows of a spreadsheet, as claims with no receipt behind them.
+
+    Every other way into this product carries a bill, and the agent reads it:
+    the amount is what the paper says, the vendor is what is printed on it,
+    and a duplicate is caught on the invoice number. A row of a spreadsheet
+    carries none of that. What it carries is what somebody typed.
+
+    So these claims are marked, permanently and everywhere, and they never
+    clear automatically. "Reviewed by the agent - it met policy with nothing
+    to decide" is a sentence about a bill that was read, and there is no bill:
+    saying it over a typed number would be the product claiming to have
+    checked something nobody has seen. Every row goes to a person.
+
+    What the policy engine can still do is worth having. A type that no rule
+    covers, a cost centre that does not exist, a total over a cap - all of
+    those are answerable from the figures alone, and all of them are asked.
+
+    No credit is spent. A credit pays for the model to read a receipt, and
+    nothing here is read.
+    """
+    actor = _identity_from_token(token)
+    if not actor:
+        return _reply(401, {"error": "Sign in to continue."}, origin)
+    acting = identity.resolve_by_email(actor, channel=None)
+    if not acting:
+        return _reply(403, {"error": "No membership for this account."}, origin)
+
+    rows = body.get("rows")
+    if not isinstance(rows, list) or not rows:
+        return _reply(400, {"error": "The sheet had no rows in it."}, origin)
+    if len(rows) > SHEET_MAX_ROWS:
+        return _reply(400, {
+            "error": f"That is {len(rows)} rows. Upload at most "
+                     f"{SHEET_MAX_ROWS} at a time so a mistake is one you can "
+                     "still find."}, origin)
+
+    org = _org_of(actor) or {}
+    org_id = str(org.get("org_id") or acting.get("org_id") or "")
+    base = money.default_for_org(org)
+    rules = policy.rules_for(org)
+    types = set(policy.expense_type_ids(rules))
+    groups = {str(g.get("id") or "") for g in (org.get("groups") or [])}
+
+    # All of them, before any of them. Half an upload is worse than none: the
+    # person has no way to tell which half, and re-uploading duplicates what
+    # already landed.
+    problems = []
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict):
+            problems.append({"row": i + 1, "error": "not a row"})
+            continue
+        why = _sheet_row_error(row, types, groups, base)
+        if why:
+            problems.append({"row": i + 1, "error": why})
+    if problems:
+        return _reply(400, {
+            "error": f"{len(problems)} of {len(rows)} rows need fixing.",
+            "rows": problems[:25],
+        }, origin)
+
+    now = int(time.time() * 1000)
+    created = []
+    for i, row in enumerate(rows):
+        amount = _as_decimal(str(row.get("amount") or "").replace(",", ""))
+        ccy = money.normalise(str(row.get("currency") or "")) or base
+        kind = str(row.get("expense_type") or "").strip()
+        day = str(row.get("date") or "").strip()[:10]
+        vendor = str(row.get("vendor") or "").strip()[:200]
+
+        # The reference comes off the same counter every other claim uses, so
+        # a sheet row and a photographed bill are numbered in one sequence and
+        # nobody has to learn a second shape.
+        updated = _orgs.update_item(
+            Key={"org_id": org_id},
+            UpdateExpression="ADD ref_seq :one",
+            ExpressionAttributeValues={":one": 1},
+            ReturnValues="ALL_NEW",
+        )["Attributes"]
+        ref = reference.of(updated, updated.get("ref_seq"))
+        submission_id = f"sub_{now + i}_{org_id[-6:]}"
+
+        # One line, because one line is what a spreadsheet row is. The engine
+        # wants items to total; this gives it the only one there is.
+        items = [{"description": vendor, "amount": str(amount), "quantity": "1"}]
+        receipt = {"vendor": vendor, "date": day, "stated_total": str(amount),
+                   "currency": ccy, "expense_type": kind or "not_covered",
+                   "line_items": items, "invoice_number": "",
+                   "handwritten": False,
+                   # On the receipt as well as the channel, because the claim
+                   # page reads this object and the distinction has to survive
+                   # anywhere the row itself is not in hand.
+                   "typed_by_submitter": True}
+        verdict = policy.evaluate_policy(
+            ccy, items, kind or "not_covered", rules, str(amount)) or {}
+        # Never released by the agent, whatever the rules say about the
+        # figures: there is no bill, so there is nothing it has read.
+        verdict["verdict"] = "needs_review"
+        verdict.setdefault("violations", []).insert(0, {
+            "code": "no_receipt",
+            "message": ("Entered on a spreadsheet, so there is no bill behind "
+                        "this. The amount is what the submitter typed and "
+                        "nothing has checked it against a receipt."),
+            "blocks_automatic_decision": True,
+            "amount": None,
+        })
+
+        group_id, group_status = intake.resolve_group(acting, org)
+        if str(row.get("group_id") or "").strip():
+            group_id, group_status = str(row["group_id"]).strip(), "assigned"
+
+        _submissions.put_item(Item={
+            "submission_id": submission_id,
+            "org_id": org_id,
+            "reference": ref,
+            "submitted_by": acting.get("email", ""),
+            "submitted_from": acting.get("mobile", ""),
+            # Its own channel, so every count, filter and report can tell a
+            # typed row from a receipt somebody sent in.
+            "channel": "sheet",
+            "received_at": now + i,
+            # Straight to audited: there is nothing queued for the worker to
+            # read, and leaving it `queued` would have the model fetch a
+            # receipt that does not exist.
+            "status": "audited",
+            "audited_at": int(time.time()),
+            "model": "none - entered on a spreadsheet",
+            "group_id": group_id,
+            "group_status": group_status,
+            "source_ref": str(body.get("source_ref") or "")[:400],
+            "sender_note": str(row.get("note") or "")[:600],
+            "receipt_key": "",
+            "receipt_type": "",
+            "receipt_name": "",
+            "receipt_bytes": 0,
+            "receipt_sha256": "",
+            "receipt": json.loads(json.dumps(receipt), parse_float=Decimal),
+            "verdict": json.loads(json.dumps(verdict), parse_float=Decimal),
+            "rationale": ("Entered on a spreadsheet by "
+                          f"{acting.get('name') or acting.get('email')}. "
+                          "No receipt was supplied, so nothing was read."),
+            "currency_resolution": {},
+            # The two fingerprints that need no printed number. A typed row
+            # that matches a bill somebody photographed is exactly the case
+            # worth catching, and the invoice key cannot catch it.
+            "sender_fingerprint": duplicates.submitter_key(
+                org_id, acting.get("email", ""), day, amount, ccy),
+            "repeat_fingerprint": duplicates.repeat_key(
+                org_id, acting.get("email", ""), vendor, amount, ccy),
+            "fingerprint": "",
+            "companion_of": "",
+        })
+        created.append({"reference": ref, "submission_id": submission_id})
+
+    _logged(acting, actor, "claims entered on a spreadsheet", {},
+            detail=f"{len(created)} rows")
+    logger.info("%s entered %d claims from a spreadsheet", actor, len(created))
+    return _reply(200, {"status": "created", "claims": created}, origin)
+
+
 def _reply(status: int, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
     """Every answer carries which build produced it.
 
@@ -4247,6 +4454,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _claim_settle_batch(tok, body, origin)
         if path.endswith("/claim/outcome"):
             return _claim_outcome(tok, body, origin)
+        if path.endswith("/claims/sheet"):
+            return _claims_from_sheet(tok, body, origin)
         if path.endswith("/apikey"):
             return _api_key(tok, body, origin)
         if path.endswith("/audit"):
