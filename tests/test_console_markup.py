@@ -4780,3 +4780,51 @@ class EveryBreakdownSumsToTheHeadlineAboveIt(unittest.TestCase):
                       "rows.forEach(r => {\n    const g = groupOf(r.sub);",
                       "rows.forEach(r => {\n    const who = String("):
             self.assertNotIn(stale, self.fn, stale)
+
+
+class AShareIsAShareOfTheWholeThing(unittest.TestCase):
+    """Where the money goes, said as a proportion rather than a ranking.
+
+    The bars scaled to the largest row, which answers "which is biggest" and
+    draws the top category full-width whatever it is worth. Fine while the row
+    carried no number beside it. Putting a percentage next to a bar measured
+    against something else would have the two contradict each other on every
+    line - Software subscriptions full-width and labelled 47%.
+
+    One meaning per row, and it is the one the heading asks for.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as h:
+            self.app = h.read()
+        self.fn = self.app.split("function renderReports() {", 1)[1].split(
+            "\nfunction ", 1)[0]
+
+    def test_the_bar_and_the_label_are_the_same_number(self):
+        self.assertIn("const share = sharePct(r.total, catTotal);", self.fn)
+        self.assertIn('style="width:${share.pct}%"', self.fn)
+        self.assertIn('<span class="bshare">${share.label}</span>', self.fn)
+
+    def test_it_is_a_share_of_the_total_not_of_the_largest(self):
+        self.assertIn("const catTotal = catRows.reduce((t, r) => t + r.total, 0);",
+                      self.fn)
+        self.assertNotIn("const catMax", self.fn)
+
+    def test_a_small_share_says_so_rather_than_nought(self):
+        # Utilities at 460 of 402,053 is not nothing, it is small - and "0%"
+        # on a row that plainly shows money reads as a fault.
+        fn = self.app.split("function sharePct(part, whole) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn('pct < 1 ? "<1%" : Math.round(pct) + "%"', fn)
+
+    def test_nothing_at_all_is_a_dash(self):
+        fn = self.app.split("function sharePct(part, whole) {", 1)[1].split(
+            "\n}", 1)[0]
+        self.assertIn('if (!whole || !part) return { pct: 0, label: "—" };', fn)
+
+    def test_by_user_rounds_it_the_same_way(self):
+        # The two were about to round it differently, which is two answers to
+        # one question on one tab.
+        self.assertIn("const share = sharePct(u.claimed, userTotal);", self.fn)
+        self.assertIn("${share.label}", self.fn)
+        self.assertEqual(1, self.app.count("function sharePct(part, whole) {"))
