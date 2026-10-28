@@ -1,9 +1,14 @@
 """Every WhatsApp message leaves by the transport the secret names.
 
-eum.py can be perfect and still never run. Four places send or receive
+eum.py can be perfect and still never run. Five places send or receive
 WhatsApp - the adapter's reply, the adapter's media fetch, the notifier's
-outcomes, and the sign-in code - and a migration that reaches three of them
-leaves the fourth quietly on a bearer token that is about to be deleted.
+outcomes, the sign-in code, and the acknowledgement for a receipt emailed in -
+and a migration that reaches four of them leaves the fifth quietly on a bearer
+token that is about to be deleted.
+
+The fifth is the one that was missed, and it was missed in the stack rather
+than in the code: `mail_fn` had neither the secret nor the grant, so the
+notice composed and was dropped before a call was made.
 
 The sign-in code is the one worth stating plainly: it is the only sender here
 allowed to fail loudly, because somebody watching a phone for a code they will
@@ -138,8 +143,24 @@ class TheInfrastructureExists(unittest.TestCase):
         self.assertIn("source_arn=wa_inbound_arn", self.src)
 
     def test_the_senders_may_call_the_service(self):
-        self.assertIn("social-messaging:SendWhatsAppMessage", self.src)
+        """Every sender, named. Not "the string appears somewhere".
+
+        This asserted only that the action existed in the file, which it did
+        while `mail_fn` - the function that acknowledges an emailed receipt on
+        WhatsApp - was absent from the grant and from the secret entirely. A
+        wiring test that cannot tell four functions from three is not a wiring
+        test.
+        """
+        # The adapter gets its own statement: it fetches media as well as sends.
         self.assertIn("social-messaging:GetWhatsAppMessageMedia", self.src)
+        self.assertIn("wa_fn.add_to_role_policy(", self.src)
+
+        # Everybody else shares one, and the tuple is the list of senders.
+        self.assertIn("for fn in (auth_fn, auditor_worker, intake_fn, mail_fn):",
+                      self.src)
+        shared = self.src.split(
+            "for fn in (auth_fn, auditor_worker, intake_fn, mail_fn):", 1)[1][:400]
+        self.assertIn("social-messaging:SendWhatsAppMessage", shared)
 
     def test_the_grant_is_not_a_wildcard_across_accounts(self):
         """Scoped to this account's resources.

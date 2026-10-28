@@ -1071,6 +1071,20 @@ class ExpensifyAIStack(Stack):
         auditor_worker.add_environment("WA_SECRET_ARN", wa_secret.secret_arn)
         wa_secret.grant_read(intake_fn)
         intake_fn.add_environment("WA_SECRET_ARN", wa_secret.secret_arn)
+        # The mail function sends too, and was the one sender that could not.
+        #
+        # A receipt emailed in is acknowledged on the sender's own mail thread
+        # and then, for somebody whose number we hold and who verified it, on
+        # the phone they actually live on - `_also_on_whatsapp` in mail.py.
+        # `notify._send_whatsapp` reads this variable at import and returns
+        # False before making a single call when it is absent, so without it
+        # that second acknowledgement was not failing: it was never attempted,
+        # and the only trace was an INFO line reading `whatsapp=False`.
+        #
+        # It also runs the intake gate in-process, and the low-credit alert
+        # that fires from there goes out the same way.
+        wa_secret.grant_read(mail_fn)
+        mail_fn.add_environment("WA_SECRET_ARN", wa_secret.secret_arn)
         wa_fn.add_environment("API_KEYS_TABLE", api_keys_table.table_name)
         wa_fn.add_environment("IDEMPOTENCY_TABLE", idempotency_table.table_name)
         wa_fn.add_environment("FINGERPRINTS_TABLE", fingerprints_table.table_name)
@@ -1130,14 +1144,22 @@ class ExpensifyAIStack(Stack):
             ],
             resources=[f"arn:aws:social-messaging:{eum_region}:{self.account}:*"],
         ))
-        # The notifier and the sign-in code send too, from their own functions.
-        for fn in (auth_fn, auditor_worker, intake_fn):
+        # The notifier, the sign-in code and the receipt acknowledgement send
+        # too, from their own functions. `mail_fn` belongs on this list for the
+        # same reason it needs the secret: an emailed receipt is acknowledged
+        # on WhatsApp from there, not from the adapter.
+        for fn in (auth_fn, auditor_worker, intake_fn, mail_fn):
             fn.add_to_role_policy(iam.PolicyStatement(
                 actions=["social-messaging:SendWhatsAppMessage"],
                 resources=[f"arn:aws:social-messaging:{eum_region}:{self.account}:*"],
             ))
 
-        wa_fn.add_environment("EUM_REGION", eum_region)
+        # Every function that calls the service, not only the adapter. The
+        # grant above is scoped to `eum_region`, and a sender left to fall back
+        # to the default in eum.py would be calling whichever region that names
+        # - the same one today, and a denial the day this constant moves.
+        for fn in (wa_fn, auth_fn, auditor_worker, intake_fn, mail_fn):
+            fn.add_environment("EUM_REGION", eum_region)
 
         CfnOutput(self, "WhatsAppWebhook", value=api.url_for_path("/whatsapp/webhook"))
         CfnOutput(self, "WhatsAppSecret", value=wa_secret.secret_name)

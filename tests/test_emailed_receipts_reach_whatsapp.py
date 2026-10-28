@@ -32,6 +32,11 @@ def read(name):
         return fh.read()
 
 
+def read_at(*parts):
+    with open(os.path.join(ROOT, *parts), encoding="utf-8") as fh:
+        return fh.read()
+
+
 class TheNoticeItself(unittest.TestCase):
 
     def setUp(self):
@@ -151,6 +156,105 @@ class ItGoesAsAnApprovedTemplate(unittest.TestCase):
         fn = self.notify.split("def _send_whatsapp(", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("return False", fn)
         self.assertIn("logger.exception(", fn)
+
+
+class TheMailFunctionCanActuallySend(unittest.TestCase):
+    """The notice composes, and then never left the building.
+
+    `notify._send_whatsapp` reads `WA_SECRET_ARN` at import and returns False
+    before making a single call when it is absent. The mail function was the
+    one sender in the stack that never had it - so every receipt emailed in
+    got its threaded email reply and nothing on the phone, with no exception
+    and no error log, only an INFO line reading `whatsapp=False`.
+
+    Four functions send WhatsApp and the adapter is only one of them. These
+    assert the wiring per function rather than that the strings exist
+    somewhere in a 1,400-line stack, which is what let this through.
+    """
+
+    def setUp(self):
+        self.stack = read_at("expensifyai", "stack.py")
+
+    def test_the_guard_that_made_it_silent_is_still_there(self):
+        # If this ever stops being the shape of it, the test below stops
+        # testing anything.
+        notify = read("notify.py")
+        self.assertIn('WA_SECRET_ARN = os.environ.get("WA_SECRET_ARN", "")', notify)
+        fn = notify.split("def _send_whatsapp(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("if not WA_SECRET_ARN:\n        return False", fn)
+
+    def test_the_mail_function_is_told_where_the_secret_is(self):
+        self.assertIn(
+            'mail_fn.add_environment("WA_SECRET_ARN", wa_secret.secret_arn)',
+            self.stack)
+
+    def test_and_is_allowed_to_read_it(self):
+        self.assertIn("wa_secret.grant_read(mail_fn)", self.stack)
+
+    def test_and_may_call_the_messaging_service(self):
+        senders = self.stack.split(
+            "for fn in (auth_fn, auditor_worker, intake_fn, mail_fn):", 1)
+        self.assertEqual(len(senders), 2,
+                         "mail_fn is not in the social-messaging grant")
+        self.assertIn("social-messaging:SendWhatsAppMessage", senders[1][:400])
+
+    def test_every_sender_names_the_region_the_grant_is_scoped_to(self):
+        # The grant is written against `eum_region`; a function left to fall
+        # back to the default in eum.py is calling whichever region that names.
+        self.assertIn(
+            "for fn in (wa_fn, auth_fn, auditor_worker, intake_fn, mail_fn):\n"
+            '            fn.add_environment("EUM_REGION", eum_region)',
+            self.stack)
+
+
+class TheTemplateIsCreatedOnTheWABA(unittest.TestCase):
+    """Naming a template is not the same as having one.
+
+    `notify.py` has sent this notice as `expenze_receipt_received` while
+    `wa_migrate.py` knew nothing about it: `templates` never submitted it, and
+    `check` printed a number as ready with the template that carries "Receipt
+    received" absent from its WABA. A send against a template the WABA has
+    never heard of is refused by Meta, logged, and swallowed - the same
+    silence from the other end.
+    """
+
+    def setUp(self):
+        self.tool = read_at("tools", "wa_migrate.py")
+
+    def test_check_looks_for_it(self):
+        self.assertIn("expenze_receipt_received", self.tool.split(
+            "NEEDED_TEMPLATES = ", 1)[1].split(")", 1)[0])
+
+    def test_templates_submits_it(self):
+        bodies = self.tool.split("TEMPLATE_BODIES = {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn('"expenze_receipt_received": {', bodies)
+
+    def test_under_the_name_notify_sends_it_as(self):
+        # One name, in two files that never see each other.
+        self.assertIn('"received": ("receivedTemplate", "expenze_receipt_received"),',
+                      read("notify.py"))
+
+    def test_with_the_two_parameters_notify_fills(self):
+        """{{1}} the reference, {{2}} the organisation, in that order.
+
+        A template approved with a different number of placeholders is
+        rejected at send time, and nobody sees the error until somebody is
+        waiting to hear their receipt arrived.
+        """
+        body = self.tool.split('"expenze_receipt_received": {', 1)[1].split(
+            "\n    },", 1)[0]
+        self.assertIn("{{1}}", body)
+        self.assertIn("{{2}}", body)
+        self.assertNotIn("{{3}}", body)
+        # The example Meta reviews against carries one value per placeholder.
+        self.assertIn('"example": ["Mobil80-Exp-41", "Mobil80"]', body)
+
+    def test_it_is_a_utility_template_not_an_authentication_one(self):
+        # Only the sign-in code is AUTHENTICATION, and it is the one entry
+        # here that carries its own category.
+        body = self.tool.split('"expenze_receipt_received": {', 1)[1].split(
+            "\n    },", 1)[0]
+        self.assertNotIn("category", body)
 
 
 if __name__ == "__main__":

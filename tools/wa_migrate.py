@@ -8,7 +8,7 @@ which number Expenze *starts* messages from.
 
     add        the new number joins, the old one stays in charge
     webhook    point its app at us and subscribe its WABA
-    templates  submit the two notice templates to the new WABA
+    templates  submit the notice templates to the new WABA
     promote    the new number takes over; the old one still receives
     finish     the old number is dropped
     check      what each configured number actually is, and what it can send
@@ -54,7 +54,17 @@ GRAPH = "https://graph.facebook.com/v21.0"
 # 24-hour service window. Everything else Expenze sends is a reply inside a
 # conversation the person started, which needs no template.
 # Needed on any number that still sends outcome notices.
-NEEDED_TEMPLATES = ("expenze_claim_settled", "expenze_claim_rejected")
+#
+# `expenze_receipt_received` is here for a reason worth writing down: it is the
+# one notice on this list that is not an outcome. A receipt emailed in brings
+# no inbound WhatsApp message with it, so the window is shut for everybody
+# except the handful who happened to message the number earlier that day - see
+# TEMPLATES in notify.py, which sends it as a template for exactly that reason.
+# It was missing from this tuple while notify.py was already sending it, so
+# `check` called a number ready while the template carrying "Receipt received"
+# did not exist on its WABA, and `templates` never created it.
+NEEDED_TEMPLATES = ("expenze_claim_settled", "expenze_claim_rejected",
+                    "expenze_receipt_received")
 
 # The sign-in code for adding a WhatsApp number. It has to be a template and
 # it has to be AUTHENTICATION: Meta delivers free-form text only to somebody
@@ -67,11 +77,12 @@ NEEDED_TEMPLATES = ("expenze_claim_settled", "expenze_claim_rejected")
 # already sends the matching body and button components.
 AUTH_TEMPLATE = "expenze_verify_code"
 
-# Copied from the two already approved, character for character, because the
-# parameter count and order are not decoration: `notify._template_parameters`
-# fills {{1}}..{{5}} in this exact sequence, and a template approved with a
-# different number of placeholders is rejected at send time with an error
-# nobody sees until somebody is waiting to be told they have been paid.
+# The settlement and rejection bodies are copied from the ones already
+# approved, character for character, because the parameter count and order are
+# not decoration: `notify._template_parameters` fills {{1}}..{{5}} in this
+# exact sequence, and a template approved with a different number of
+# placeholders is rejected at send time with an error nobody sees until
+# somebody is waiting to be told they have been paid.
 TEMPLATE_BODIES = {
     "expenze_claim_settled": {
         "text": ("Your expense claim for {{1}} has been reimbursed.\n\n"
@@ -97,6 +108,21 @@ TEMPLATE_BODIES = {
         "example": ["Toit Brewpub", "INR 2,114.00",
                     "The cover count was four but only two people were on the trip.",
                     "Meera Iyer"],
+    },
+    # Two parameters, in the order `notify._template_parameters` fills them:
+    # the claim reference and the organisation it is claimed against.
+    #
+    # {{1}} is not always one reference. An email carrying three receipts has
+    # three, and naming the first of them hands somebody a number covering a
+    # third of what they sent - so notify.py passes "Mobil80-Exp-41 and 2 more",
+    # or "3 receipts" where no reference was formed. The wording here has to
+    # read correctly for all three, which is why it is a bare label.
+    "expenze_receipt_received": {
+        "text": ("Your receipt has arrived and is being read.\n\n"
+                 "Claim: {{1}}\nClaimed against: {{2}}\n\n"
+                 "It is being checked against your expense policy, and the "
+                 "outcome follows in a separate message."),
+        "example": ["Mobil80-Exp-41", "Mobil80"],
     },
 }
 
@@ -302,13 +328,14 @@ def cmd_finish(_args) -> None:
 
 
 def cmd_templates(args) -> None:
-    """Submit the two notice templates to the new number's WABA.
+    """Submit the notice templates to the new number's WABA.
 
     Meta approves templates per WABA, not per business, so moving to a
-    dedicated number means the settlement and rejection notices have to be
-    approved again before they can reach anybody outside the 24-hour service
-    window. Submitted here rather than retyped into Business Manager, because
-    the body text has to match what the code fills in exactly.
+    dedicated number means the settlement, rejection and receipt-received
+    notices have to be approved again before they can reach anybody outside
+    the 24-hour service window. Submitted here rather than retyped into
+    Business Manager, because the body text has to match what the code fills
+    in exactly.
     """
     cfg = read()
     entry = next((e for e in _identities(cfg)
@@ -367,7 +394,8 @@ def cmd_templates(args) -> None:
         print(f"\nSign-in codes for {args.phone_number_id} now use {AUTH_TEMPLATE}.")
 
     print("\nApproval is usually minutes and occasionally a day. Run `check` "
-          "to see where they are, and do not `promote` until all three say ok.")
+          "to see where they are, and do not `promote` until every one of "
+          "them says ok.")
 
 
 WEBHOOK_URL = ("https://0w1qn4vso1.execute-api.ap-southeast-1.amazonaws.com"
@@ -575,7 +603,7 @@ def main() -> None:
     webhook.add_argument("--phone-number-id", required=True)
 
     templates = sub.add_parser(
-        "templates", help="submit the two notice templates to a number's WABA")
+        "templates", help="submit the notice templates to a number's WABA")
     templates.add_argument("--phone-number-id", required=True)
 
     sub.add_parser("finish", help="stop accepting the old number")

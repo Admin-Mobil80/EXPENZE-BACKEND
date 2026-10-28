@@ -261,10 +261,11 @@ def _also_on_whatsapp(sender: str, queued: list[dict[str, Any]]) -> None:
     gone, and a WhatsApp that does not land must not turn a successful
     submission into a failed one.
 
-    Reaches only people already inside WhatsApp's 24-hour window, because an
-    emailed receipt brings no inbound message with it and there is no approved
-    template for this notice yet. `NO_TEMPLATE` in notify.py says what
-    approving one would change.
+    Goes as an approved template, not as text. An emailed receipt brings no
+    inbound message with it, so WhatsApp's 24-hour window is shut for
+    everybody except the handful who happened to message the number earlier
+    that day - free text would reach almost nobody. `TEMPLATES` in notify.py
+    names it; `wa_migrate.py` submits it.
     """
     try:
         member = identity.resolve_by_email(sender, channel=None)
