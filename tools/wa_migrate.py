@@ -13,6 +13,13 @@ which number Expenze *starts* messages from.
     finish     the old number is dropped
     check      what each configured number actually is, and what it can send
 
+And, separately, moving that number off Meta's API onto AWS End User
+Messaging - the same number, a different carrier, no bearer token:
+
+    aws-wire   record the number's AWS id and point inbound at our topic
+    aws-on     start sending and receiving through AWS
+    aws-off    go back to calling Meta directly
+
 Run them in that order, testing between each. Every step is reversible by
 running the previous one, because nothing is deleted until `finish`.
 
@@ -437,6 +444,113 @@ def cmd_webhook(args) -> None:
           "subscription, and watch the expenze-whatsapp log if nothing lands.")
 
 
+# ---------------------------------------------------------------------------
+# Moving the same number onto AWS End User Messaging
+# ---------------------------------------------------------------------------
+
+EUM_REGION = "us-east-1"
+INBOUND_TOPIC = "expenze-whatsapp-inbound"
+
+
+def _eum(region: str = EUM_REGION):
+    return boto3.client("socialmessaging", region_name=region)
+
+
+def _linked(region: str) -> list[dict]:
+    return _eum(region).list_linked_whatsapp_business_accounts().get(
+        "linkedAccounts", [])
+
+
+def cmd_aws_wire(args) -> None:
+    """Teach the secret the AWS name for the number it already sends from.
+
+    The WABA is linked in the console, outside CloudFormation, so the stack
+    can create the topic but cannot subscribe the account to it - and the
+    number has one id in Meta and a completely different one in AWS, with
+    nothing in either hinting at the other. Both gaps are closed here.
+
+    Nothing is switched on. This only makes it possible to switch on.
+    """
+    cfg = read()
+    meta_id = str(cfg.get("phoneNumberId") or "")
+    if not meta_id:
+        sys.exit("The secret has no phoneNumberId. Run `check` first.")
+
+    region = args.region
+    found = None
+    for account in _linked(region):
+        detail = _eum(region).get_linked_whatsapp_business_account(
+            id=account["id"])["account"]
+        for number in detail.get("phoneNumbers", []):
+            if str(number.get("metaPhoneNumberId") or "") == meta_id:
+                found = (detail, number)
+                break
+    if not found:
+        sys.exit(
+            f"No number in {region} has metaPhoneNumberId {meta_id}.\n"
+            "Link the WABA in the End User Messaging console first - and check "
+            "the region, because the link is regional and the console defaults "
+            "to whichever one you last used.")
+
+    account, number = found
+    print(f"Matched {number['displayPhoneNumber']} ({number.get('displayPhoneNumberName','')})")
+    print(f"  Meta id   {meta_id}")
+    print(f"  AWS id    {number['phoneNumberId']}")
+    print(f"  WABA      {account['id']}  quality {number.get('qualityRating','?')}")
+
+    sns = boto3.client("sns", region_name=REGION)
+    topic = next((t["TopicArn"] for t in sns.list_topics().get("Topics", [])
+                  if t["TopicArn"].rsplit(":", 1)[-1] == INBOUND_TOPIC), "")
+    if not topic:
+        sys.exit(f"No SNS topic named {INBOUND_TOPIC} in {REGION}. Deploy the stack first.")
+
+    # Inbound stops arriving at the API Gateway webhook the moment AWS owns
+    # the delivery, so this has to be in place before the transport flips -
+    # not after, or receipts sent in between are simply lost.
+    _eum(region).put_whatsapp_business_account_event_destinations(
+        id=account["id"],
+        eventDestinations=[{"eventDestinationArn": topic}],
+    )
+    print(f"\nInbound now publishes to {topic}")
+
+    cfg["aws"] = {"region": region,
+                  "phoneNumberId": number["phoneNumberId"],
+                  "wabaId": account["id"]}
+    cfg.setdefault("transport", "meta")
+    write(cfg)
+    print(f"\nTransport is still '{cfg['transport']}'. Nothing has moved yet.\n"
+          "Send a receipt now and confirm it still lands, then `aws-on`.")
+
+
+def cmd_aws_on(_args) -> None:
+    """Flip sending and receiving onto AWS."""
+    cfg = read()
+    if not (cfg.get("aws") or {}).get("phoneNumberId"):
+        sys.exit("No aws block in the secret. Run `aws-wire` first.")
+    cfg["transport"] = "aws"
+    write(cfg)
+    print("\nTransport is now 'aws'. The bearer token is no longer used for "
+          "sending - leave it in place until you are sure, then remove it.\n"
+          "Send a receipt and watch the expenze-whatsapp log. `aws-off` reverts.")
+
+
+def cmd_aws_off(_args) -> None:
+    """Back to calling Meta directly.
+
+    The reason the token is left in the secret through the cutover: without it
+    this command has nothing to fall back to.
+    """
+    cfg = read()
+    if not cfg.get("accessToken"):
+        sys.exit("No accessToken in the secret, so there is nothing to fall "
+                 "back to. Restore it before reverting.")
+    cfg["transport"] = "meta"
+    write(cfg)
+    print("\nTransport is now 'meta'. Inbound still arrives over SNS until the "
+          "event destination is removed, and the webhook is still registered - "
+          "both paths reach the same handler, so nothing is lost either way.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -461,10 +575,18 @@ def main() -> None:
 
     sub.add_parser("finish", help="stop accepting the old number")
 
+    wire = sub.add_parser(
+        "aws-wire", help="point the linked WABA at our topic and record its AWS id")
+    wire.add_argument("--region", default=EUM_REGION,
+                      help=f"where the WABA is linked (default {EUM_REGION})")
+    sub.add_parser("aws-on", help="send and receive through AWS End User Messaging")
+    sub.add_parser("aws-off", help="go back to calling Meta directly")
+
     args = parser.parse_args()
     {"check": cmd_check, "add": cmd_add, "webhook": cmd_webhook,
      "templates": cmd_templates, "promote": cmd_promote,
-     "finish": cmd_finish}[args.command](args)
+     "finish": cmd_finish, "aws-wire": cmd_aws_wire,
+     "aws-on": cmd_aws_on, "aws-off": cmd_aws_off}[args.command](args)
 
 
 if __name__ == "__main__":

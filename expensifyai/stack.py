@@ -55,6 +55,7 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_logs as logs,
     aws_s3 as s3,
+    aws_sns as sns,
     aws_lambda_event_sources as lambda_sources,
     aws_events as events,
     aws_events_targets as events_targets,
@@ -1079,8 +1080,56 @@ class ExpensifyAIStack(Stack):
         wa_res.add_method("GET", wa_integration)    # Meta's subscription challenge
         wa_res.add_method("POST", wa_integration)   # inbound messages
 
+        # ------------------------------------------------------------------
+        # AWS End User Messaging Social.
+        #
+        # The same number, carried by AWS rather than by us calling Meta. Two
+        # things it needs that the Graph path did not:
+        #
+        # A topic, because this is where inbound arrives. Meta POSTs to a URL;
+        # End User Messaging publishes to SNS, and the WABA's event
+        # destination has to be pointed at this topic by hand - the WABA is
+        # linked outside CloudFormation, in the console, so the stack can
+        # create the topic but cannot subscribe the account to it. `wa/`
+        # carries a command that does it.
+        #
+        # And permission, because the credential stops being a bearer token
+        # kept in the secret and becomes this function's own role. That is the
+        # real prize here: nothing left to leak, and nothing left to rotate.
+        wa_inbound = sns.Topic(
+            self,
+            "WhatsAppInbound",
+            topic_name="expenze-whatsapp-inbound",
+            display_name="Inbound WhatsApp from AWS End User Messaging",
+        )
+        wa_fn.add_event_source(lambda_sources.SnsEventSource(wa_inbound))
+
+        # The WABA lives in us-east-1 while the rest of this stack is in
+        # ap-southeast-1, so the resource is named across regions. Scoped to
+        # this account's social-messaging resources rather than "*": a wildcard
+        # here would let the function send from any number the account ever
+        # links, including one nobody meant to expose to it.
+        eum_region = self.node.try_get_context("eum_region") or "us-east-1"
+        wa_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=[
+                "social-messaging:SendWhatsAppMessage",
+                "social-messaging:GetWhatsAppMessageMedia",
+                "social-messaging:GetLinkedWhatsAppBusinessAccount",
+            ],
+            resources=[f"arn:aws:social-messaging:{eum_region}:{self.account}:*"],
+        ))
+        # The notifier and the sign-in code send too, from their own functions.
+        for fn in (auth_fn, auditor_worker, intake_fn):
+            fn.add_to_role_policy(iam.PolicyStatement(
+                actions=["social-messaging:SendWhatsAppMessage"],
+                resources=[f"arn:aws:social-messaging:{eum_region}:{self.account}:*"],
+            ))
+
+        wa_fn.add_environment("EUM_REGION", eum_region)
+
         CfnOutput(self, "WhatsAppWebhook", value=api.url_for_path("/whatsapp/webhook"))
         CfnOutput(self, "WhatsAppSecret", value=wa_secret.secret_name)
+        CfnOutput(self, "WhatsAppInboundTopic", value=wa_inbound.topic_arn)
 
         CfnOutput(self, "MailRuleSet", value=rule_set.receipt_rule_set_name)
         CfnOutput(self, "MailAddress", value=f"receipts@{zone_name}")
@@ -1201,6 +1250,12 @@ class ExpensifyAIStack(Stack):
         auth.add_resource("submissions").add_method("POST", auth_integration)
         auth.add_resource("people").add_method("POST", auth_integration)
         auth.add_resource("audit").add_method("POST", auth_integration)
+        # The figures, computed server-side so that a reader without a screen -
+        # the MCP server, and the Alexa skill behind it - gets the same numbers
+        # as the tabs rather than its own arithmetic.
+        auth.add_resource("reports").add_method("POST", auth_integration)
+        # Mints the long-lived, read-only token the MCP server carries.
+        auth.add_resource("mcp-token").add_method("POST", auth_integration)
 
         # The float: paying one out, and reading what each holder has left.
         advances_res = auth.add_resource("advances")

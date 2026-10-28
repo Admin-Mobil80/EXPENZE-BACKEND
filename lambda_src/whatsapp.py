@@ -35,6 +35,7 @@ from typing import Any, Optional
 
 import boto3
 
+import eum
 import identity
 import intake
 import policy
@@ -121,8 +122,15 @@ def _graph(url: str, token: str, *, data: bytes | None = None) -> bytes:
         return r.read()
 
 
-def _fetch_media(media_id: str, token: str) -> tuple[bytes, str] | None:
-    """Meta hands over an id; the bytes need two authenticated hops."""
+def _fetch_media(media_id: str, token: str, from_id: str = "") -> tuple[bytes, str] | None:
+    """Meta hands over an id; the bytes need two authenticated hops.
+
+    Or, through AWS, a metadata call and an S3 round trip - see eum.py. Either
+    way the caller gets bytes and a mime type and cannot tell which happened.
+    """
+    cfg = config()
+    if eum.enabled(cfg):
+        return eum.fetch_media(cfg, media_id, from_id, receipts.MAX_BYTES)
     try:
         meta = json.loads(_graph(f"{GRAPH}/{media_id}", token))
         mime = receipts.normalise_type(meta.get("mime_type") or "")
@@ -211,15 +219,21 @@ def _reply(to: str, text: str, from_id: str = "", token: str = "") -> None:
     signature-checked, so it is as trustworthy as the message it arrived with.
     """
     cfg = config()
-    payload = json.dumps({
+    message = {
         "messaging_product": "whatsapp",
         "to": to,
         "type": "text",
         "text": {"preview_url": False, "body": text[:4000]},
-    }).encode()
+    }
+    if eum.enabled(cfg):
+        # Same message, same number, different carrier. `send` reports rather
+        # than raises, and a failed reply is already not worth losing the
+        # receipt over.
+        eum.send(cfg, message, from_id)
+        return
     try:
         _graph(f"{GRAPH}/{from_id or cfg['phoneNumberId']}/messages",
-               token or cfg["accessToken"], data=payload)
+               token or cfg["accessToken"], data=json.dumps(message).encode())
     except Exception:
         logger.exception("reply to %s failed", to)
 
@@ -276,7 +290,11 @@ def _handle_message(msg: dict[str, Any], cfg: dict[str, str], from_id: str = "")
     # photograph and answering the sender both go through the app that owns
     # the number; the other app's token cannot see either.
     cfg = creds_for(from_id) or cfg
-    token = cfg["accessToken"]
+    # Absent once AWS carries the traffic: the credential is then the Lambda's
+    # own role and there is no token in the secret to read. `.get` rather than
+    # `[...]`, so a secret with the token already removed does not take the
+    # whole adapter down on its first message.
+    token = str(cfg.get("accessToken") or "")
     sender = msg.get("from", "")
     kind = msg.get("type")
 
@@ -305,7 +323,7 @@ def _handle_message(msg: dict[str, Any], cfg: dict[str, str], from_id: str = "")
                        "your expense policy.", from_id, token)
         return
 
-    fetched = _fetch_media(media_id, token)
+    fetched = _fetch_media(media_id, token, from_id)
     if not fetched:
         _reply(sender, "I couldn't read that attachment. A photo (JPEG or PNG) or a PDF works best.", from_id, token)
         return
@@ -380,7 +398,38 @@ def _handle_message(msg: dict[str, Any], cfg: dict[str, str], from_id: str = "")
         logger.info("intake returned %s for a resolved sender", status)
 
 
+def _dispatch(entries: list[dict[str, Any]], cfg: dict[str, str]) -> None:
+    """Walk Meta's entry shape and handle every message in it.
+
+    Shared by both transports on purpose. A receipt that arrives over SNS and
+    one that arrives over the webhook are the same receipt, and the moment
+    they are handled by two different pieces of code is the moment one of them
+    starts quietly behaving differently.
+    """
+    for entry in entries:
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            # Which of our numbers this arrived on. A WABA can hold several,
+            # and during a migration it holds two.
+            from_id = str((value.get("metadata") or {}).get("phone_number_id") or "")
+            for msg in value.get("messages", []):
+                _handle_message(msg, cfg, from_id)
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    # An SNS delivery from AWS End User Messaging. No signature to check:
+    # SNS authenticated the publisher and IAM authorised the subscription,
+    # which is the whole reason the app secret stops being needed.
+    if eum.is_sns(event):
+        try:
+            _dispatch(eum.entries(event), config())
+        except Exception:
+            # Never raise. A raised handler tells SNS to redeliver the whole
+            # batch, and every receipt in it that already succeeded would be
+            # charged a second credit.
+            logger.exception("an End User Messaging delivery failed")
+        return {"statusCode": 200, "body": "ok"}
+
     method = event.get("httpMethod", "POST")
     if method == "GET":
         return _verify(event)
@@ -395,15 +444,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             logger.warning("rejected an unsigned or mis-signed webhook delivery")
             return {"statusCode": 403, "body": "forbidden"}
 
-        body = json.loads(raw or "{}")
-        for entry in body.get("entry", []):
-            for change in entry.get("changes", []):
-                value = change.get("value", {})
-                # Which of our numbers this arrived on. A WABA can hold
-                # several, and during a migration it holds two.
-                from_id = str((value.get("metadata") or {}).get("phone_number_id") or "")
-                for msg in value.get("messages", []):
-                    _handle_message(msg, cfg, from_id)
+        _dispatch(json.loads(raw or "{}").get("entry", []), cfg)
 
         # Always 200 once signed: a non-2xx makes Meta retry, and a retry storm
         # on a handler that spends credits is worse than a dropped message.

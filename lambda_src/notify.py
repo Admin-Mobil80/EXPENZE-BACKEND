@@ -34,6 +34,7 @@ from typing import Any
 
 import boto3
 
+import eum
 import wacfg
 
 logger = logging.getLogger()
@@ -98,13 +99,13 @@ def settled_notice(claim: dict[str, Any]) -> dict[str, str]:
     from_float = str(claim.get("source") or "") == "float"
 
     if from_float:
-        subject = f"{paid} set against your float — {vendor}{tail}"
+        subject = f"{paid} set against your advance — {vendor}{tail}"
         lines = [
             f"{'Part of your' if part else 'Your'} expense claim for {vendor} "
             "has been set against the cash advance you hold.",
             "",
-            "No payment has been made to you - you spent this from the float, "
-            "and your advance has been reduced by it.",
+            "No payment has been made to you - you spent this from the "
+            "advance you hold, and that advance has been reduced by it.",
             "",
             f"Set against:  {paid}",
             f"Approved:     {approved}",
@@ -139,7 +140,7 @@ def settled_notice(claim: dict[str, Any]) -> dict[str, str]:
     ref = _ref_line(claim)
     short = ((f"{ref}. " if ref else "")
              + (f"{paid} for {vendor} has been set against your cash advance - "
-                "no payment is coming to you, your float is reduced by it."
+                "no payment is coming to you, your advance is reduced by it."
                 if from_float
                 else f"{paid} has been reimbursed for {vendor}."
                      + (f" {money(outstanding, ccy)} of this claim is still owed."
@@ -384,13 +385,13 @@ def settled_batch_notice(claim: dict[str, Any]) -> dict[str, str]:
     from_float = str(claim.get("source") or "") == "float"
 
     if from_float:
-        subject = f"{paid} set against your float — {n} claims"
+        subject = f"{paid} set against your advance — {n} claims"
         lines = [
             f"{n} of your expense claims have been set against the cash "
             "advance you hold.",
             "",
-            "No payment has been made to you - you spent this from the float, "
-            "and your advance has been reduced by it.",
+            "No payment has been made to you - you spent this from the "
+            "advance you hold, and that advance has been reduced by it.",
             "",
             f"Set against:  {paid}",
         ]
@@ -423,7 +424,7 @@ def settled_batch_notice(claim: dict[str, Any]) -> dict[str, str]:
                   "your records.", "", "Expenze - expenze.ai"]
 
     short = ((f"{paid} for {n} claims has been set against your cash advance - "
-              "no payment is coming to you, your float is reduced by it."
+              "no payment is coming to you, your advance is reduced by it."
               if from_float
               else f"{paid} has been reimbursed, covering {n} claims: "
                    + ", ".join(refs) + ".")
@@ -703,34 +704,36 @@ def _send_whatsapp(to: str, kind: str, claim: dict[str, Any],
             body = (notice or {}).get("whatsapp") or (notice or {}).get("text") or ""
             if not body:
                 return False
-            plain = json.dumps({
+            message = {
                 "messaging_product": "whatsapp", "to": to, "type": "text",
                 "text": {"preview_url": False, "body": body[:4000]},
-            }).encode()
-            req = urllib.request.Request(
-                f"{GRAPH}/{cfg['phoneNumberId']}/messages", data=plain)
-            req.add_header("Authorization", f"Bearer {cfg['accessToken']}")
-            req.add_header("Content-Type", "application/json")
-            with urllib.request.urlopen(req, timeout=20):
-                return True
+            }
+        else:
+            key, fallback = TEMPLATES[kind]
+            message = {
+                "messaging_product": "whatsapp",
+                "to": to,
+                "type": "template",
+                "template": {
+                    "name": cfg.get(key, fallback),
+                    "language": {"code": cfg.get("templateLanguage", "en")},
+                    "components": [{
+                        "type": "body",
+                        "parameters": [{"type": "text", "text": v}
+                                       for v in _template_parameters(kind, claim)],
+                    }],
+                },
+            }
 
-        key, fallback = TEMPLATES[kind]
-        payload = json.dumps({
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "template",
-            "template": {
-                "name": cfg.get(key, fallback),
-                "language": {"code": cfg.get("templateLanguage", "en")},
-                "components": [{
-                    "type": "body",
-                    "parameters": [{"type": "text", "text": v}
-                                   for v in _template_parameters(kind, claim)],
-                }],
-            },
-        }).encode()
+        # The message is built the same way whichever carrier takes it - only
+        # the last hop differs. Notices we start name no inbound number, so
+        # they go from whichever number the secret prefers.
+        if eum.enabled(cfg):
+            return eum.send(cfg, message)
+
         req = urllib.request.Request(
-            f"{GRAPH}/{cfg['phoneNumberId']}/messages", data=payload)
+            f"{GRAPH}/{cfg['phoneNumberId']}/messages",
+            data=json.dumps(message).encode())
         req.add_header("Authorization", f"Bearer {cfg['accessToken']}")
         req.add_header("Content-Type", "application/json")
         with urllib.request.urlopen(req, timeout=20):

@@ -42,6 +42,10 @@ FREE = {
     "AWS::ApiGateway::Method", "AWS::ApiGateway::Resource",
     "AWS::ApiGateway::Deployment",
     "AWS::S3::BucketPolicy",
+    # The topic is billable and tagged; a subscription to it is not a separate
+    # charge and has no Tags property to carry one. Delivery is billed against
+    # the topic, which is where the tag already is.
+    "AWS::SNS::Subscription",
     "AWS::SES::ReceiptRule", "AWS::SES::ReceiptRuleSet",
     "AWS::CloudFront::OriginAccessControl",
     "AWS::CertificateManager::Certificate",   # free when used with CloudFront

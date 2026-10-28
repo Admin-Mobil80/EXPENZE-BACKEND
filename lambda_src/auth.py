@@ -53,6 +53,8 @@ from botocore.exceptions import ClientError
 
 import audit
 import budgets as budget_rules
+import capabilities
+import eum
 import fx
 import wacfg
 import identity
@@ -259,12 +261,43 @@ def _new_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
-def _sign_session(email: str) -> str:
-    expires = int(time.time()) + SESSION_TTL_SECONDS
-    payload = json.dumps({"email": email, "exp": expires}, separators=(",", ":"))
+def _sign(claims: dict[str, Any]) -> str:
+    """A claim set, signed. The only place a bearer token is made."""
+    payload = json.dumps(claims, separators=(",", ":"))
     body = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
     sig = hmac.new(_key(), body.encode(), hashlib.sha256).digest()
     return f"{body}.{base64.urlsafe_b64encode(sig).decode().rstrip('=')}"
+
+
+def _sign_session(email: str) -> str:
+    return _sign({"email": email, "exp": int(time.time()) + SESSION_TTL_SECONDS})
+
+
+# A year. The point of this token is that it outlives a sign-in - a config
+# file somebody has to re-paste every twelve hours is not a setup, it is a
+# chore that gets abandoned - and the safety comes from what it can reach
+# rather than from how long it lives.
+MCP_TTL_SECONDS = 365 * 24 * 60 * 60
+
+
+def _sign_mcp(email: str, issued: int) -> str:
+    """A token that can read the reports and do nothing else.
+
+    `kind` is the whole security model. A session token is a credential for
+    the entire console - every endpoint resolves identity through
+    `_identity_from_token` - so a year-long one sitting in a plaintext config
+    file would be a bearer token for the claims, the payment run and the
+    settlement history. This one carries a `kind`, and
+    `_identity_from_token` refuses anything that has one, so the only door it
+    opens is the one it was minted for.
+
+    `iat` is how it is revoked without a table to keep: the membership row
+    carries `mcp_from`, and a token issued before that moment is dead.
+    Minting a replacement moves the mark, so there is never a second live
+    token somebody has forgotten about.
+    """
+    return _sign({"email": email, "kind": "mcp", "iat": issued,
+                  "exp": issued + MCP_TTL_SECONDS})
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +569,7 @@ def _send_wa_code(number: str, code: str) -> None:
     # update, exactly like the number itself.
     template = cfg.get("otpTemplate", "cloudmeter_verify_code")
     language = cfg.get("otpTemplateLanguage", "en")
-    payload = json.dumps({
+    message = {
         "messaging_product": "whatsapp",
         "to": re.sub(r"[^\d]", "", number),
         "type": "template",
@@ -551,7 +584,18 @@ def _send_wa_code(number: str, code: str) -> None:
                  "parameters": [{"type": "text", "text": code}]},
             ],
         },
-    }).encode()
+    }
+
+    # Unlike the other two senders, this one is allowed to fail loudly. Its
+    # caller turns a failure into "we could not send the code" on screen, and
+    # somebody waiting on a verification code needs to be told it is not
+    # coming rather than left watching a phone that will never buzz.
+    if eum.enabled(cfg):
+        if not eum.send(cfg, message):
+            raise RuntimeError("End User Messaging would not send the code")
+        return
+
+    payload = json.dumps(message).encode()
     req = urllib.request.Request(
         f"https://graph.facebook.com/v21.0/{cfg['phoneNumberId']}/messages", data=payload)
     req.add_header("Authorization", f"Bearer {cfg['accessToken']}")
@@ -3808,6 +3852,130 @@ def _people(token: str, body: dict[str, Any], origin: str | None) -> dict[str, A
     } for r in sorted(rows, key=lambda x: int(x.get("added_at") or 0))]}, origin)
 
 
+REPORTS = ("brief", "spend", "queue", "pending", "claim", "auto_clear")
+
+
+def _reader_of(token: str) -> dict[str, Any] | None:
+    """Who is asking for a report: a signed-in person, or their MCP token.
+
+    The only place an MCP token is honoured. Everywhere else in this file
+    identity comes from `_identity_from_token`, which refuses any token
+    carrying a `kind` - so this function is the entire blast radius of the
+    long-lived credential, and it is a read.
+    """
+    claims = _claims_of(token) or {}
+    email = str(claims.get("email") or "").lower()
+    kind = str(claims.get("kind") or "")
+    if not email or (kind and kind != "mcp"):
+        return None
+
+    acting = identity.resolve_by_email(email, channel=None)
+    if not acting:
+        return None
+
+    if kind == "mcp":
+        # Revoked, or replaced by a later token. `mcp_from` moves every time
+        # one is minted, so the newest is the only live one and there is
+        # never a forgotten second key to the same door.
+        if int(claims.get("iat") or 0) < int(acting.get("mcp_from") or 0):
+            return None
+    return acting
+
+
+def _mcp_token(token: str, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
+    """Mint, or revoke, the token that reads the reports.
+
+    Minted from a real session only: `_identity_from_token` refuses an MCP
+    token, so this credential cannot be used to issue itself a fresh one and
+    outlive the moment somebody revokes it.
+
+    Revoking and re-minting are the same write - moving `mcp_from` to now -
+    because they are the same act. The difference is only whether a
+    replacement is handed back.
+    """
+    actor = _identity_from_token(token)
+    if not actor:
+        return _reply(401, {"error": "Sign in to continue."}, origin)
+    acting = identity.resolve_by_email(actor, channel=None)
+    if not acting:
+        return _reply(403, {"error": "No membership for this account."}, origin)
+    if not runs_the_org(acting):
+        return _reply(403, {
+            "error": "Only an owner, administrator or finance executive can do this."},
+            origin)
+
+    now = int(time.time())
+    _users.update_item(
+        Key={"email": actor, "org_id": acting["org_id"]},
+        UpdateExpression="SET mcp_from = :t",
+        ExpressionAttributeValues={":t": now},
+    )
+    audit.record(str(acting.get("org_id") or ""),
+                 "reports token revoked" if body.get("revoke")
+                 else "reports token issued", actor)
+    if body.get("revoke"):
+        return _reply(200, {"revoked": True}, origin)
+    return _reply(200, {"token": _sign_mcp(actor, now),
+                        "expires_at": now + MCP_TTL_SECONDS}, origin)
+
+
+def _reports(token: str, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
+    """The figures, computed server-side, for a reader with no screen.
+
+    Everything here is already on a tab somewhere. The reason it is also an
+    endpoint is that the console computes it in the browser - `spendIn`,
+    `autoClearRate` and `payableClaims` are all JavaScript - and a second
+    reader that did the same arithmetic again in Python would be a second
+    chance to answer a different question from the one on the label. That has
+    happened three times in a fortnight here, and every one of them was caught
+    only because two numbers were on screen at once. Spoken aloud, through the
+    MCP server and the Alexa skill behind it, there is no second number.
+
+    So this goes through `capabilities`, which goes through `policy.stage`,
+    `policy.owed` and `policy.awaiting_payment` - the same three predicates
+    the tabs go through.
+
+    Owner, administrator and finance only, on the same reasoning as the audit
+    log: these are org-wide figures about whose money went where, and there is
+    no per-person scoping that would make them safe for staff. An employee
+    asking what they are owed has `/submissions`, which is scoped to them.
+    """
+    acting = _reader_of(token)
+    if not acting:
+        return _reply(401, {"error": "Sign in to continue."}, origin)
+    if not runs_the_org(acting):
+        return _reply(403, {
+            "error": "Only an owner, administrator or finance executive can read the reports."},
+            origin)
+
+    which = str(body.get("report") or "brief").strip().lower()
+    if which not in REPORTS:
+        return _reply(400, {"error": f"No such report. Try one of: "
+                                     f"{', '.join(REPORTS)}."}, origin)
+
+    org_id = str(acting.get("org_id") or "")
+    claims = capabilities.rows(org_id)
+    period = str(body.get("period") or "month").strip().lower()[:32]
+    # So a category is spoken by the name this organisation gave it rather
+    # than by the id it is filed under.
+    labels = capabilities.type_labels(org_id)
+
+    if which == "brief":
+        out = capabilities.brief(claims, None, labels)
+    elif which == "spend":
+        out = capabilities.spend(claims, period, None, labels)
+    elif which == "queue":
+        out = capabilities.queue(claims)
+    elif which == "pending":
+        out = capabilities.pending(claims)
+    elif which == "auto_clear":
+        out = capabilities.auto_clear(claims, period)
+    else:
+        out = capabilities.claim(claims, str(body.get("ref") or "")[:80])
+
+    return _reply(200, {"report": which, **out}, origin)
+
+
 def _audit_log(token: str, body: dict[str, Any], origin: str | None) -> dict[str, Any]:
     """The organisation's decisions, newest first.
 
@@ -3901,7 +4069,39 @@ def _identity_from_token(token: str) -> str | None:
         return None
     if int(claims.get("exp", 0)) < int(time.time()):
         return None
+    # A token minted for one particular door is not a session.
+    #
+    # Everything in this console that asks who is calling asks here, so
+    # whatever this function accepts can approve a claim, record a payment
+    # and read the settlement history. The reports token is long-lived and
+    # lives in a config file on somebody's laptop, which is a fine place for
+    # a credential that can read a total and an unacceptable one for a
+    # credential that can move money. Refusing every `kind` here - rather
+    # than listing the kinds to refuse - means a token type added later is
+    # locked out by default instead of being quietly admitted.
+    if claims.get("kind"):
+        return None
     return str(claims.get("email", "")).lower() or None
+
+
+def _claims_of(token: str) -> dict[str, Any] | None:
+    """A token's claims if the signature and expiry hold, else nothing.
+
+    Deliberately says nothing about what the token is *for*; each caller
+    decides which kinds it serves.
+    """
+    try:
+        body, sig = token.split(".", 1)
+        expected = hmac.new(_key(), body.encode(), hashlib.sha256).digest()
+        pad = "=" * (-len(sig) % 4)
+        if not hmac.compare_digest(expected, base64.urlsafe_b64decode(sig + pad)):
+            return None
+        claims = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+    except Exception:
+        return None
+    if int(claims.get("exp", 0)) < int(time.time()):
+        return None
+    return claims if isinstance(claims, dict) else None
 
 
 # ---------------------------------------------------------------------------
@@ -4432,6 +4632,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "/claim/review", "/claim/retype",
                     "/credits/order", "/credits/verify",
                     "/submissions", "/people", "/credits/ledger", "/apikey", "/audit",
+                    "/reports", "/mcp-token",
                     "/advances", "/advances/record",
                     "/receipt/view", "/receipt/upload", "/receipt/submit")):
             email = str(body.get("email", "")).strip().lower()
@@ -4465,6 +4666,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return _claims_from_sheet(tok, body, origin)
         if path.endswith("/apikey"):
             return _api_key(tok, body, origin)
+        if path.endswith("/reports"):
+            return _reports(tok, body, origin)
+        if path.endswith("/mcp-token"):
+            return _mcp_token(tok, body, origin)
         if path.endswith("/audit"):
             return _audit_log(tok, body, origin)
         if path.endswith("/advances/record"):
