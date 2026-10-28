@@ -434,9 +434,10 @@ class TheSturdiestFingerprintIsTheSenderNotTheVendor(unittest.TestCase):
     def test_both_fingerprints_are_claimed(self):
         # The sender one cannot see two people claiming one invoice, because
         # the submitters differ; the vendor one can. Neither catches both.
-        self.assertIn("held = (duplicates.claim(sender_fp, submission_id) if sender_fp else None)",
+        self.assertIn('(sender_fp, "submitter"', self.worker)
+        self.assertIn('(fingerprint, "invoice"', self.worker)
+        self.assertIn("held = duplicates.claim(key, submission_id, **extra)",
                       self.worker)
-        self.assertIn("if not held and fingerprint:", self.worker)
 
     def test_the_sender_one_is_tried_first(self):
         # It is the one that does not quietly stop working when a vendor name

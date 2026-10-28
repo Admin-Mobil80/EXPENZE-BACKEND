@@ -37,7 +37,6 @@ from __future__ import annotations
 import logging
 import os
 import time
-from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -133,46 +132,12 @@ def _cleared_at(row: dict[str, Any]) -> int:
     return _ms(row.get("audited_at"))
 
 
-def _owed(row: dict[str, Any]) -> tuple[str, str]:
-    """What a settlement would pay for this claim, in the currency it leaves in.
-
-    A payout leaves the account in the organisation's own currency however many
-    currencies the receipts were in, converted at the rate stamped on the claim
-    when it was audited - never at today's, because an amount owed that moves
-    between the day it was approved and the day it is paid is not an amount
-    owed.
-
-    What a reviewer released comes first and the engine's figure second, which
-    is the order the console uses: a claim approved over a cap pays what the
-    person approved, and reading the engine's figure instead would report nil
-    for every overridden claim.
-
-    An empty amount is a foreign claim whose rate could not be had. The figure
-    is unknown rather than zero, and the digest says so rather than inventing
-    one.
-    """
-    verdict = row.get("verdict") or {}
-    payout = row.get("payout_value") or {}
-    home = str(payout.get("currency") or "").upper()
-    claim_ccy = str(verdict.get("currency") or "").upper()
-
-    raw = row.get("approved_total")
-    if raw in (None, ""):
-        raw = verdict.get("reimbursable_total")
-    try:
-        owed = Decimal(str(raw or "0"))
-    except (ArithmeticError, ValueError):
-        return ("", claim_ccy or home)
-
-    if not home or not claim_ccy or claim_ccy == home:
-        return (f"{owed:.2f}", home or claim_ccy)
-    try:
-        rate = Decimal(str(payout.get("rate") or "0"))
-    except (ArithmeticError, ValueError):
-        rate = Decimal(0)
-    if rate <= 0:
-        return ("", claim_ccy)
-    return (str((owed * rate).quantize(Decimal("0.01"))), home)
+# What a claim is worth was written here, when the digest was the only thing
+# that had to agree with the console about it. It now lives beside
+# `awaiting_payment` in `policy`, which is where the rest of the claim
+# predicates with more than one caller ended up, and `capabilities` reads the
+# same function to answer the question out loud.
+_owed = policy.owed
 
 
 def _line(row: dict[str, Any]) -> dict[str, Any]:

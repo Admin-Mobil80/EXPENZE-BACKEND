@@ -17,7 +17,7 @@ replenishes by advancing more.
 float, or one they paid personally. It must leave the float alone, or the next
 replenishment is calculated against a balance that never moved.
 
-    still out = advanced - returned - settled from the float
+    still out = advanced - returned - settled against the advance
     in hand   = still out - claims spent but not yet settled
 
 The second is a worst case while claims are undecided, because none of them
@@ -349,7 +349,7 @@ class TheConsoleOffersTheChoiceWhereTheMoneyIsPaid(unittest.TestCase):
 
     def test_the_control_exists(self):
         self.assertIn('<select id="sf-source">', self.app)
-        self.assertIn('<option value="float">Their float</option>', self.app)
+        self.assertIn('<option value="float">Their advance</option>', self.app)
 
     def test_it_is_hidden_for_somebody_with_no_float(self):
         # A dropdown with one real option is furniture.
@@ -365,7 +365,7 @@ class TheConsoleOffersTheChoiceWhereTheMoneyIsPaid(unittest.TestCase):
     def test_it_says_what_each_choice_does_to_the_balance(self):
         self.assertIn("No money moves.", self.fn)
         self.assertIn("It draws the advance down from", self.fn)
-        self.assertIn("Reimbursed on top of the float, which stays at", self.fn)
+        self.assertIn("Reimbursed on top of the advance, which stays at", self.fn)
 
     def test_it_quotes_what_is_still_out_rather_than_what_is_in_hand(self):
         # `in hand` subtracts every unsettled claim including this one, so it
@@ -378,7 +378,7 @@ class TheConsoleOffersTheChoiceWhereTheMoneyIsPaid(unittest.TestCase):
     def test_the_choice_reaches_the_server(self):
         self.assertIn('source: settlingFromFloat ? "float" : "payout",', self.app)
         # Read from the control only while it is on screen. It is built with
-        # "Their float" first inside a hidden wrapper, so reading it blind
+        # "Their advance" first inside a hidden wrapper, so reading it blind
         # says "float" for somebody who holds none.
         self.assertIn("&& !srcWrap1.hidden", self.app)
         self.assertIn('source: detail.source || "payout",', self.app)
@@ -398,7 +398,7 @@ class TheFloatTabShowsItsWorking(unittest.TestCase):
     def test_every_figure_the_balance_is_made_of_is_a_column(self):
         # A balance somebody cannot reconstruct is one they will not act on.
         head = self.app.split('<tbody id="adv-list">', 1)[0].rsplit("<thead>", 1)[1]
-        for col in ("In hand", "Advanced", "Settled from it", "In flight"):
+        for col in ("In hand", "Advanced", "Settled against advance", "In flight"):
             self.assertIn(f">{col}<", head)
 
     def test_what_they_are_carrying_leads(self):
@@ -407,7 +407,7 @@ class TheFloatTabShowsItsWorking(unittest.TestCase):
         import re
         head = self.app.split('<tbody id="adv-list">', 1)[0].rsplit("<thead>", 1)[1]
         cols = re.findall(r'<th scope="col"[^>]*>([^<]*)</th>', head)
-        self.assertEqual(["Holder", "In hand", "Advanced", "Settled from it",
+        self.assertEqual(["Holder", "In hand", "Advanced", "Settled against advance",
                           "In flight", "Last movement"], cols)
 
     def test_still_out_is_not_a_second_column_saying_the_same_thing(self):
@@ -481,7 +481,7 @@ class TheFloatTabShowsItsWorking(unittest.TestCase):
 class AFloatSettlementIsNotAPayment(unittest.TestCase):
     """The row described a transfer that did not happen.
 
-    Settling from the float moves no money - the holder already had it - and
+    Settling against the advance moves no money - the holder already had it - and
     the rest of the settlement row went on saying otherwise: mode "bank
     transfer", a required UTR, "Paid on", a button reading "Record X as
     paid", and a notice telling them their claim "has been reimbursed" with a
@@ -526,19 +526,19 @@ class AFloatSettlementIsNotAPayment(unittest.TestCase):
                       self.form)
 
     def test_the_button_does_not_say_paid(self):
-        self.assertIn("against the float`", self.form)
+        self.assertIn("against the advance`", self.form)
 
     def test_and_neither_does_the_notice(self):
         self.assertIn('from_float = str(claim.get("source") or "") == "float"',
                       self.notice)
-        self.assertIn("set against your float", self.notice)
+        self.assertIn("set against your advance", self.notice)
         self.assertIn("No payment has been made to you", self.notice)
 
     def test_the_notice_omits_the_mode_and_the_bank_reference(self):
         self.assertIn('(("Accounted on:", "paid_on"),) if from_float', self.notice)
 
     def test_the_whatsapp_line_too(self):
-        self.assertIn("no payment is coming to you, your float is reduced by it.",
+        self.assertIn("no payment is coming to you, your advance is reduced by it.",
                       self.notice)
 
 
@@ -908,3 +908,210 @@ class AFloatThatWasHandedBackIsClosed(unittest.TestCase):
         # and the ledger is the record of them.
         rows = self.view.split("ledger = sorted(", 1)[1]
         self.assertIn('"kind": str(r.get("kind") or "advance")', rows)
+
+
+class OneHolderSOwnPage(unittest.TestCase):
+    """What happened to *this* person's cash, rather than to everybody's.
+
+    The float table answers "who is carrying what" and the Movements ledger
+    answers "what happened recently", and neither answers the question finance
+    actually arrives with: somebody is holding an envelope, the figure in it
+    disagrees with the screen, and they want this person's movements together
+    with a balance after each one. That was a matter of reading the whole
+    ledger and filtering it by eye.
+
+    The balance column is the point of the page. Without it the rows are a
+    list somebody has to add up themselves, and a ledger that does not
+    reconcile to the figure above it is one they have to take on trust.
+    """
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split("function renderFloatHolder(h, ccy) {", 1)[1].split(
+            "\n}", 1)[0]
+
+    def test_the_name_in_the_float_table_opens_it(self):
+        # A real button, so it is reachable by keyboard and announced as
+        # something that acts. A div with a click handler is neither.
+        self.assertIn('<button class="linkish pname" type="button" ', self.app)
+        self.assertIn('data-holder="${esc(String(h.email || "").toLowerCase())}"',
+                      self.app)
+
+    def test_it_is_delegated_once_rather_than_wired_per_row(self):
+        # The float table is rebuilt on every render.
+        self.assertIn('$("adv-list").addEventListener("click"', self.app)
+        self.assertIn('e.target.closest("[data-holder]")', self.app)
+
+    def test_there_is_a_way_back_to_the_list(self):
+        self.assertIn('id="advd-back"', self.app)
+        self.assertIn('floatHolder = null;', self.app)
+
+    def test_the_drill_down_does_not_outlive_the_visit(self):
+        # Leaving Advances and coming back should land on the holders, not on
+        # whoever happened to be open last time.
+        goto = self.app.split("function goTo(id, claimId) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('if (id !== "advances") { floatHolder = null; '
+                      'floatLedgerAll = false; }', goto)
+
+    def test_the_list_and_the_page_are_never_both_on_screen(self):
+        fn = self.app.split("function renderAdvances() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('["advd-nav", "advd-tiles", "advd-panel"].forEach(id => advShow(id, one))',
+                      fn)
+        self.assertIn('["adv-tiles", "adv-float", "adv-moves"].forEach(id => advShow(id, !one))',
+                      fn)
+
+    def test_they_are_hidden_by_display_not_by_the_hidden_attribute(self):
+        """`.tiles4` sets `display:grid` and a class rule beats `[hidden]`.
+
+        Hiding these with the attribute leaves them on screen, which reads
+        like the render never ran rather than like a CSS precedence problem.
+        """
+        self.assertIn("el.style.display = on ? \"\" : \"none\"", self.app)
+
+    def test_a_holder_who_is_no_longer_one_falls_back_to_the_list(self):
+        # The ledger reloaded and their balance went to nothing, or this
+        # reader's scope narrowed. An empty page about a person who is not
+        # there is the worse answer.
+        fn = self.app.split("function renderAdvances() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("if (floatHolder && !viewing) floatHolder = null;", fn)
+
+    def test_every_figure_the_balance_is_made_of_is_a_tile(self):
+        tiles = self.app.split('id="advd-tiles"', 1)[1].split("</section>", 1)[0]
+        for key in ("In hand", "Still out", "Advanced", "Settled against advance",
+                    "In flight"):
+            self.assertIn(f">{key}<", tiles, key)
+
+    def test_the_ledger_carries_a_balance_after_each_movement(self):
+        head = self.app.split('<tbody id="advd-log">', 1)[0].rsplit("<thead>", 1)[1]
+        cols = re.findall(r'<th scope="col"[^>]*>([^<]*)</th>', head)
+        self.assertEqual(["When", "What", "Amount", "Still out",
+                          "Recorded by", "Note"], cols)
+
+    def test_the_holder_column_is_dropped_because_the_page_is_one_holder(self):
+        # `floatRow`'s five-column form. Naming them on every line is noise.
+        self.assertIn("floatRow(m, hccy, 5)", self.fn)
+
+    def test_the_balance_is_anchored_to_the_tile_and_worked_backwards(self):
+        """Accumulating forwards from nothing is the obvious way and is wrong.
+
+        The server returns the most recent two hundred movements across every
+        holder, so on a busy account a holder's oldest rows are not there at
+        all. Starting from zero would print a column confidently short by
+        whatever is missing, and the top row would disagree with the tile it
+        sits under.
+        """
+        self.assertIn("let balance = stillOut;", self.fn)
+        self.assertIn("mine.forEach(m => { after.set(m, balance); "
+                      "balance -= floatEffect(m); });", self.fn)
+
+    def test_it_opens_on_a_window_of_recent_movements(self):
+        """Oldest-first puts the newest rows at the bottom.
+
+        Fine at twelve and useless at two hundred, which is where this was
+        heading. A statement solves it the way every bank does: a window of
+        recent movements, so the page lands on what is recent and still reads
+        downwards.
+        """
+        self.assertIn("const LEDGER_WINDOW = 25;", self.app)
+        self.assertIn("const windowed = !floatLedgerAll "
+                      "&& mine.length > LEDGER_WINDOW;", self.fn)
+        self.assertIn("const shown = windowed ? mine.slice(0, LEDGER_WINDOW) : mine;",
+                      self.fn)
+
+    def test_opened_by_a_brought_forward_balance(self):
+        """Otherwise the first figure in the column is unaccountable.
+
+        A window of a ledger has to add up on its own, and the brought-forward
+        line is what lets it. It also turns the two-hundred-row cap from a
+        quiet wrongness into an ordinary statement page: a ledger that does
+        not reach the first advance is just a window with an opening balance,
+        which is what it always was.
+        """
+        self.assertIn("Balance brought forward", self.fn)
+        self.assertIn("const brought = oldestShown", self.fn)
+        self.assertIn("(after.get(oldestShown) || 0) - floatEffect(oldestShown)",
+                      self.fn)
+
+    def test_and_the_rest_is_one_click_away(self):
+        self.assertIn("`Show all ${mine.length} movements`", self.fn)
+        self.assertIn("floatLedgerAll = true; renderAdvances();", self.fn)
+
+    def test_each_holder_opens_on_their_recent_movements(self):
+        """However far the last holder's ledger happened to be expanded.
+
+        Three ways out of a holder's page and all of them reset it: opening
+        somebody else, going back to the list, and leaving the tab. A counted
+        assertion would pass on the declaration alone, so each site is named.
+        """
+        self.assertIn("floatHolder = pick.dataset.holder || null;", self.app)
+        opening = self.app.split("floatHolder = pick.dataset.holder || null;",
+                                 1)[1].split("renderAdvances();", 1)[0]
+        self.assertIn("floatLedgerAll = false;", opening)
+
+        back = self.app.split('$("advd-back").addEventListener', 1)[1].split(
+            "});", 1)[0]
+        self.assertIn("floatLedgerAll = false;", back)
+
+        goto = self.app.split("function goTo(id, claimId) {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("floatLedgerAll = false;", goto)
+
+    def test_the_ledger_reads_oldest_first_unlike_every_other_list_here(self):
+        """A running balance and a newest-first list are at odds.
+
+        Shown newest first, a row's amount explains the gap to the row
+        *below* it rather than the one above, because reading downwards
+        travels backwards in time. Manjunath's top three were an advance of
+        7,000 against 14,800, an advance of 1,065 against 7,800 - seven
+        thousand *lower* on a line marked with a plus - and a drawdown of
+        6,785 against 6,735, only 1,065 lower. Every figure was right and the
+        column could not be read.
+
+        A passbook is oldest first precisely so each line is the line before
+        it plus or minus that line's amount, and this page is a passbook: it
+        is checked against cash somebody is holding. Latest-on-top belongs to
+        the queues, where the question is what needs attention now.
+        """
+        self.assertIn("shown.slice().reverse().forEach(m => {", self.fn)
+
+    def test_but_the_balance_is_still_computed_newest_first(self):
+        # The anchor is the current figure, so the walk has to start there.
+        # Reversing the computation as well as the display would anchor it to
+        # the oldest row instead, which is the figure that is not known.
+        walk = self.fn.split("let balance = stillOut;", 1)[1].split("\n", 2)[1]
+        self.assertIn("mine.forEach(", walk)
+        self.assertNotIn("reverse", walk)
+
+    def test_the_ledger_ends_on_the_figure_in_the_tile(self):
+        # Which is why the newest row no longer needs to be on top: the tile
+        # carries the answer and the ledger carries the working.
+        self.assertIn("ending on the figure above", self.fn)
+        self.assertIn("each line is the line before it ", self.fn)
+
+    def test_the_page_shows_only_that_holder_s_movements(self):
+        self.assertIn('.filter(m => String(m.holder || "").toLowerCase() === email)',
+                      self.fn)
+
+
+class AClaimInFlightLeavesTheBalanceWhereItWas(unittest.TestCase):
+    """The sign on each movement, which is what the column is made of."""
+
+    def setUp(self):
+        self.app = read("../PORTAL/app.html")
+        self.fn = self.app.split("function floatEffect(m) {", 1)[1].split("\n}", 1)[0]
+
+    def test_an_advance_adds_and_the_other_two_subtract(self):
+        self.assertIn('if (m.kind === "advance") return advMinor(m.amount);', self.fn)
+        self.assertIn('if (m.kind === "return" || m.kind === "spent") '
+                      'return -advMinor(m.amount);', self.fn)
+
+    def test_anything_else_moves_nothing(self):
+        """A claim in flight is spent cash that has not drawn the advance down.
+
+        Nobody has yet said whether the float accounts for it or a separate
+        payout reimburses them, so giving it a sign would make the column
+        disagree with the tile above it - which is the one thing the column
+        exists to prevent. The ledger shows it without a sign for the same
+        reason.
+        """
+        self.assertIn("return 0;", self.fn)
+        self.assertNotIn("in_flight", self.fn)

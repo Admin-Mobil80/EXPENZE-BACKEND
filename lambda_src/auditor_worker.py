@@ -220,6 +220,19 @@ def _invoice_of(submission_id: str) -> str:
     return taxlike((_other_claim(submission_id).get("receipt") or {}).get("invoice_number"))
 
 
+def _date_of(submission_id: str) -> str:
+    """The date printed on a claim's bill, for naming it beside another's.
+
+    `repeat_key` ignores dates on purpose - that is how it catches one bill
+    photographed twice when the model misreads the date off both. The cost is
+    that a subscription charged the same amount every month matches itself,
+    so the finding has to put both dates in front of the reviewer: with them
+    there, two months of Claude Pro is cleared at a glance instead of
+    investigated.
+    """
+    return str((_other_claim(submission_id).get("receipt") or {}).get("date") or "")
+
+
 def _source_ref_of(submission_id: str) -> str:
     """Which delivery a claim arrived on - one email is one `mail://` key.
 
@@ -392,15 +405,30 @@ def _audit_one(row: dict[str, Any]) -> None:
             org_id, row.get("submitted_by", ""), receipt.get("vendor", ""),
             verdict.get("receipt_total"), verdict.get("currency", ""))
 
-        held = (duplicates.claim(sender_fp, submission_id) if sender_fp else None)
-        if not held and fingerprint:
-            held = duplicates.claim(fingerprint, submission_id)
-        if not held and shape_fp:
-            held = duplicates.claim(shape_fp, submission_id)
-        if not held and repeat_fp:
-            held = duplicates.claim(repeat_fp, submission_id,
-                                    days=duplicates.REPEAT_DAYS,
-                                    within=duplicates.REPEAT_WITHIN)
+        # Which key caught it is carried along with the fact that one did.
+        #
+        # All four used to end in one hardcoded sentence - "the same vendor,
+        # date, total and currency" - which describes none of them. It is
+        # wrong about the vendor for `submitter_key`, wrong about the date and
+        # total for `invoice_key`, wrong about everything for
+        # `file_shape_key`, and wrong about the date for `repeat_key`, which
+        # deliberately ignores dates. A reviewer who checks the claim being
+        # named, finds the dates differ and concludes the system is wrong has
+        # been told something untrue - and the next flag, the real one, is
+        # worth less for it.
+        held, caught_by = None, ""
+        for key, label, extra in (
+                (sender_fp, "submitter", {}),
+                (fingerprint, "invoice", {}),
+                (shape_fp, "file", {}),
+                (repeat_fp, "repeat", {"days": duplicates.REPEAT_DAYS,
+                                       "within": duplicates.REPEAT_WITHIN})):
+            if not key:
+                continue
+            held = duplicates.claim(key, submission_id, **extra)
+            if held:
+                caught_by = label
+                break
         # Two documents of one purchase, or two claims?
         #
         # An invoice and its receipt arrive in one email all the time - the
@@ -434,6 +462,7 @@ def _audit_one(row: dict[str, Any]) -> None:
         # not share one. A bill with no invoice number proves nothing and is
         # left to a person.
         this_invoice = taxlike(receipt.get("invoice_number"))
+
         same_message = bool(source_ref) and bool(this_invoice) and held and (
             _source_ref_of(held) == source_ref
             and _invoice_of(held) == this_invoice)
@@ -461,13 +490,38 @@ def _audit_one(row: dict[str, Any]) -> None:
             # problems with different answers, and the second is invisible
             # unless the other person is named.
             other = _describe(held)
+            # Each key says what it actually compared, in the words of the
+            # thing it compared. `repeat` says out loud that it did not look
+            # at the dates, because that is the one a reviewer is most likely
+            # to check and find different - a monthly subscription billed
+            # twice in a day is exactly what it is for, and two different
+            # months forwarded together is exactly what it false-positives on.
+            said = {
+                "submitter": (
+                    f"The same person already claimed this amount, in this "
+                    f"currency, dated this day, on {other}."),
+                "invoice": (
+                    f"This vendor's invoice number was already claimed on "
+                    f"{other}. A vendor does not issue two invoices under one "
+                    f"number."),
+                "file": (
+                    f"An identical file was already submitted as {other} - "
+                    f"same name, same size, to the byte."),
+                "repeat": (
+                    f"The same person claimed the same amount from the same "
+                    f"vendor within a day, on {other}. This bill is dated "
+                    f"{receipt.get('date') or 'unknown'} and that one "
+                    f"{_date_of(held) or 'unknown'} - the dates are not part "
+                    f"of this check, so a subscription billed monthly at one "
+                    f"price matches itself."),
+            }.get(caught_by, (
+                f"This looks like a claim already made on {other}."))
             verdict.setdefault("violations", []).insert(0, {
                 "code": "possible_duplicate",
                 "message": (
-                    f"The same vendor, date, total and currency were already "
-                    f"claimed on {other}. If this is a second receipt that "
-                    f"happens to match, approve it; if it is the same bill "
-                    f"twice, reject it."
+                    f"{said} If this is a second receipt that happens to "
+                    f"match, approve it; if it is the same bill twice, "
+                    f"reject it."
                 ),
                 "amount": None,
                 "blocks_automatic_decision": True,

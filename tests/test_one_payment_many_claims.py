@@ -485,7 +485,7 @@ class NothingIsPaidUntilItCanBeFiled(unittest.TestCase):
 
 
 class TheFloatIsOnlyOfferedToSomebodyWhoHoldsOne(unittest.TestCase):
-    """The batch form offered "Their float" to everybody.
+    """The batch form offered "Their advance" to everybody.
 
     The single settlement form has always shown that choice only to a person
     who actually holds an advance - for everybody else there is no choice to
@@ -503,7 +503,7 @@ class TheFloatIsOnlyOfferedToSomebodyWhoHoldsOne(unittest.TestCase):
         self.assertIn("const holdsFloat = !!(ADVANCES.holders || []).find(", self.fn)
 
     def test_the_option_is_not_drawn_otherwise(self):
-        self.assertIn('(holdsFloat ? `<option value="float">Their float</option>` : "")',
+        self.assertIn('(holdsFloat ? `<option value="float">Their advance</option>` : "")',
                       self.fn)
 
     def test_nor_is_the_row_it_sits_in(self):

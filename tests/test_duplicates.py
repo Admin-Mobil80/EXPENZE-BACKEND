@@ -292,8 +292,13 @@ class EveryKeyWasAnExactMatchOnAStringAModelProduced(unittest.TestCase):
         with open(os.path.join(ROOT, "lambda_src", "auditor_worker.py"),
                   encoding="utf-8") as handle:
             worker = handle.read()
-        order = [worker.index(f"duplicates.claim({fp}") for fp in
-                 ("sender_fp", "fingerprint", "shape_fp", "repeat_fp")]
+        # The keys are tried in the order they are listed, so the listing is
+        # the thing to assert. It used to be four separate `claim` calls; it
+        # is now one loop that also carries which key caught it, so the
+        # reviewer can be told what actually matched.
+        order = [worker.index(pair) for pair in
+                 ('(sender_fp, "submitter"', '(fingerprint, "invoice"',
+                  '(shape_fp, "file"', '(repeat_fp, "repeat"')]
         self.assertEqual(order, sorted(order))
 
     def test_a_rejected_claim_gives_it_back_like_the_others(self):
@@ -468,7 +473,96 @@ class TheSameAttachmentTwiceByDifferentRoutes(unittest.TestCase):
         with open(os.path.join(ROOT, "lambda_src", "auditor_worker.py"),
                   encoding="utf-8") as h:
             worker = h.read()
-        self.assertLess(worker.index("duplicates.claim(sender_fp"),
-                        worker.index("duplicates.claim(shape_fp"))
-        self.assertLess(worker.index("duplicates.claim(fingerprint"),
-                        worker.index("duplicates.claim(shape_fp"))
+        self.assertLess(worker.index('(sender_fp, "submitter"'),
+                        worker.index('(shape_fp, "file"'))
+        self.assertLess(worker.index('(fingerprint, "invoice"'),
+                        worker.index('(shape_fp, "file"'))
+
+
+class TheFindingSaysWhatItActuallyCompared(unittest.TestCase):
+    """One sentence described four keys, and fitted none of them.
+
+    Every duplicate finding read "The same vendor, date, total and currency
+    were already claimed on ..." whichever key caught it. That is wrong about
+    the vendor for `submitter_key`, wrong about the date and the total for
+    `invoice_key`, wrong about all four for `file_shape_key`, and wrong about
+    the date for `repeat_key` - which ignores dates on purpose, because a
+    monthly subscription billed twice in one day is the thing it exists to
+    catch.
+
+    Riyad hit the consequence on Mobil80-Exp-185: a Claude Pro invoice
+    flagged against Exp-184, with a sentence claiming the dates matched. He
+    checked, the dates did not match, and the honest conclusion from what he
+    was told is that the duplicate checker is wrong. It was not - it had
+    simply been made to say something it never knew.
+
+    A reviewer who learns that the reasons are unreliable discounts the next
+    one too, and the next one is the real duplicate.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "lambda_src", "auditor_worker.py"),
+                  encoding="utf-8") as handle:
+            self.worker = handle.read()
+        self.block = self.worker.split('"code": "possible_duplicate"', 1)[0]
+
+    def test_the_key_that_caught_it_is_carried_out_of_the_loop(self):
+        self.assertIn("held, caught_by = None, \"\"", self.worker)
+        self.assertIn("caught_by = label", self.worker)
+
+    def test_each_key_has_its_own_words(self):
+        said = self.worker.split("said = {", 1)[1].split("}.get(", 1)[0]
+        for label in ("submitter", "invoice", "file", "repeat"):
+            self.assertIn(f'"{label}":', said, label)
+
+    def test_the_repeat_key_puts_both_dates_in_front_of_the_reviewer(self):
+        """The one a reviewer is most likely to check and find different.
+
+        Saying "the dates were not compared" is honest and still leaves them
+        opening the other claim to find out what the dates actually are. With
+        both printed, two months of the same subscription is cleared at a
+        glance - which is the whole job of this finding, since it is evidence
+        for a person rather than a decision.
+        """
+        said = self.worker.split("said = {", 1)[1].split("}.get(", 1)[0]
+        repeat = said.split('"repeat":', 1)[1]
+        self.assertIn("receipt.get('date')", repeat)
+        self.assertIn("_date_of(held)", repeat)
+        self.assertIn("the dates are not part", repeat)
+
+    def test_and_the_other_claim_s_date_is_read_off_its_row(self):
+        self.assertIn("def _date_of(submission_id: str) -> str:", self.worker)
+        self.assertIn('.get("receipt") or {}).get("date")', self.worker)
+
+    def test_the_detection_itself_is_unchanged(self):
+        """A sharper rule was tried here and reverted.
+
+        Releasing a `repeat` match when both bills carry *different* invoice
+        numbers looks right - a vendor does not issue two invoices under one
+        number, so two numbers ought to mean two bills. Replayed against the
+        pair the key exists for it fails: Exp-67 and Exp-68 were one bill
+        photographed twice, read as `WL15089` and `WL16089`, which differ
+        exactly as two real invoice numbers do. The rule would have released
+        the duplicate it was written to catch.
+
+        So the flag stays and the words change. `possible_duplicate` is
+        evidence for a human by design, and a false positive a reviewer
+        clears in one click is a far smaller cost than a miss.
+        """
+        self.assertNotIn('caught_by == "repeat" and held', self.worker)
+
+    def test_no_key_claims_a_match_on_everything_any_more(self):
+        self.assertNotIn("The same vendor, date, total and currency", self.worker)
+
+    def test_an_unknown_key_still_says_something_true(self):
+        # A fifth key added without words of its own must not silently
+        # inherit another key's claim about what it compared.
+        fallback = self.worker.split("}.get(caught_by, (", 1)[1].split("))", 1)[0]
+        self.assertIn("looks like a claim already made on", fallback)
+
+    def test_and_every_one_of_them_still_names_the_other_claim(self):
+        said = self.worker.split("said = {", 1)[1].split("}.get(", 1)[0]
+        self.assertEqual(4, said.count("{other}"))
+
+    def test_the_advice_is_said_once_rather_than_four_times(self):
+        self.assertEqual(1, self.worker.count("if it is the same bill twice"))

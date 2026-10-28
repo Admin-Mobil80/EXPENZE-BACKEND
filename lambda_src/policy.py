@@ -576,8 +576,143 @@ def awaiting_payment(item: dict) -> bool:
     if action:
         return False
 
+    return agent_would_release(item)
+
+
+def agent_would_release(item: dict) -> bool:
+    """Whether the engine's own verdict clears this claim without a person.
+
+    Pulled out of `awaiting_payment` because two callers need the question
+    asked at different moments. `awaiting_payment` is about *now* - it stops
+    at a claim that has already been paid, because such a claim is no longer
+    waiting for money. The auto-clear rate is about what happened when the
+    receipt was read, which does not stop being true once finance pays it.
+    """
     verdict = item.get("verdict") or {}
     if str(verdict.get("verdict") or "") not in ("approved", "partially_approved"):
         return False
     return not any(v.get("blocks_automatic_decision")
                    for v in (verdict.get("violations") or []))
+
+
+def cleared_by(item: dict) -> str:
+    """Who cleared this claim: `"agent"`, `"human"`, or `""` if nobody has.
+
+    The distinction the auto-clear rate is made of, and the reason that rate
+    once read 69% in one tile and 20% in another: counting every claim that
+    *reached* a cleared stage answers "how diligently is the queue worked",
+    not "how much of the work does the agent take off a person". A person's
+    approval is a person's approval however automatic the stage it leads to.
+
+    Deliberately not asked through `awaiting_payment`, which was the first
+    thing tried and was wrong in a way that flattered nobody: that predicate
+    goes false the moment an `outcome` is written, so every claim the agent
+    released and finance then paid came back as cleared by no one. On a live
+    account it reported five agent clearances against twenty-nine human ones
+    for October and an auto-clear rate of 10%, with fourteen settled claims
+    counted as undecided - the same error as the 69% reading, in the other
+    direction.
+    """
+    action = str(item.get("review_action") or "")
+    if action == "approved":
+        return "human"
+    if action:
+        # Rejected or withdrawn. A decision was made, but nothing was cleared.
+        return ""
+    if str(item.get("companion_of") or ""):
+        return ""
+    return "agent" if agent_would_release(item) else ""
+
+
+def owed(item: dict) -> tuple[str, str]:
+    """What a settlement would pay for this claim, in the currency it leaves in.
+
+    A payout leaves the account in the organisation's own currency however many
+    currencies the receipts were in, converted at the rate stamped on the claim
+    when it was audited - never at today's, because an amount owed that moves
+    between the day it was approved and the day it is paid is not an amount
+    owed.
+
+    What a reviewer released comes first and the engine's figure second, which
+    is the order the console uses: a claim approved over a cap pays what the
+    person approved, and reading the engine's figure instead would report nil
+    for every overridden claim. Five approved claims worth Rs 9,004.63 were
+    once invisible to finance because `approved_total` had been stored as zero.
+
+    An empty amount is a foreign claim whose rate could not be had. The figure
+    is unknown rather than zero, and every caller says so rather than
+    inventing one.
+
+    Lives here rather than in `digest`, which is where it was written, because
+    the finance digest is no longer the only thing that has to agree with the
+    console about what a claim is worth - `capabilities` now answers the same
+    question out loud.
+    """
+    verdict = item.get("verdict") or {}
+    payout = item.get("payout_value") or {}
+    home = str(payout.get("currency") or "").upper()
+    claim_ccy = str(verdict.get("currency") or "").upper()
+
+    raw = item.get("approved_total")
+    if raw in (None, ""):
+        raw = verdict.get("reimbursable_total")
+    try:
+        amount = Decimal(str(raw or "0"))
+    except (ArithmeticError, ValueError):
+        return ("", claim_ccy or home)
+
+    if not home or not claim_ccy or claim_ccy == home:
+        return (f"{amount:.2f}", home or claim_ccy)
+    try:
+        rate = Decimal(str(payout.get("rate") or "0"))
+    except (ArithmeticError, ValueError):
+        rate = Decimal(0)
+    if rate <= 0:
+        return ("", claim_ccy)
+    return (str((amount * rate).quantize(Decimal("0.01"))), home)
+
+
+def stage(item: dict) -> str:
+    """Where this claim has got to, in the console's own vocabulary.
+
+    One of `companion`, `withdrawn`, `rejected`, `settled`, `part_settled`,
+    `approved` or `in_review` - the same seven the console's `claimStage`
+    returns, because a figure spoken aloud with no screen to check it against
+    has to be the figure on the screen.
+
+    Two field names carry the endings and they are easy to transpose:
+    `withdrawn` is a **review action**, taken by the submitter before anybody
+    judged anything, while `outcome` is only ever `settled` or `rejected` and
+    belongs to the settlement stage. A rejection can therefore arrive from
+    either - a reviewer deciding the company does not owe it, or finance
+    declining to pay something already approved - and both end the claim.
+
+    `approved` is deliberately `awaiting_payment` rather than a test of its
+    own, so this cannot come to disagree with the Pending settlement list
+    about which claims are waiting.
+    """
+    if str(item.get("companion_of") or ""):
+        return "companion"
+
+    action = str(item.get("review_action") or "")
+    if action in ("withdrawn", "rejected"):
+        return action
+
+    if str(item.get("outcome") or "") == "rejected":
+        return "rejected"
+
+    if str(item.get("outcome") or "") == "settled":
+        paid = _stated(item.get("outcome_paid")) or Decimal(0)
+        due = _stated(owed(item)[0])
+        # Finance recorded a payment, so the claim is closed whatever the
+        # arithmetic says - the only open question is whether it was paid in
+        # full. When the amount owed cannot be read there is nothing to
+        # compare against, and the two wrong answers are both worse than
+        # "settled": `part_settled` leaves it looking like finance still owes
+        # money, and falling through to `in_review` would put a closed claim
+        # back into the review queue.
+        if due is None:
+            return "settled"
+        return "settled" if paid >= due else "part_settled"
+
+    return "approved" if awaiting_payment(item) else "in_review"

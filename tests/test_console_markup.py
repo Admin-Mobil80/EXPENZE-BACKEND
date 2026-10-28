@@ -4828,3 +4828,46 @@ class AShareIsAShareOfTheWholeThing(unittest.TestCase):
         self.assertIn("const share = sharePct(u.claimed, userTotal);", self.fn)
         self.assertIn("${share.label}", self.fn)
         self.assertEqual(1, self.app.count("function sharePct(part, whole) {"))
+
+
+class TheDuplicateNamesAWayToGetThere(unittest.TestCase):
+    """The one finding whose answer is on a different screen.
+
+    Deciding a possible duplicate means looking at the other bill: is this the
+    same purchase twice, or two that happen to match? The reference was plain
+    text, so answering it meant copying "Mobil80-Exp-184" into a search box
+    and losing your place in the queue.
+    """
+
+    def setUp(self):
+        with open(os.path.join(ROOT, "../PORTAL/app.html"), encoding="utf-8") as h:
+            self.app = h.read()
+        self.fn = self.app.split("function nameTheOtherClaim(into, text, sub) {",
+                                 1)[1].split("\n}", 1)[0]
+
+    def test_the_reference_in_the_finding_opens_that_claim(self):
+        self.assertIn("openClaim(other.id, view)", self.fn)
+
+    def test_it_is_found_by_the_reference_the_reader_can_see(self):
+        self.assertIn("SUBMISSIONS.find(s => s.reference === ref)", self.fn)
+
+    def test_a_reference_this_console_cannot_resolve_stays_plain_text(self):
+        """A link that goes nowhere is worse than no link.
+
+        An older claim outside what was fetched, or one this reader is not
+        allowed to see, resolves to nothing - and a reference that looks
+        clickable and does nothing reads as a broken console rather than as
+        an absent claim.
+        """
+        self.assertIn("if (at < 0 || !other) { into.textContent = text; return; }",
+                      self.fn)
+
+    def test_it_is_a_button_rather_than_a_styled_span(self):
+        # Reachable by keyboard and announced as something that acts.
+        self.assertIn('link.type = "button";', self.fn)
+        self.assertIn('link.className = "linkish";', self.fn)
+
+    def test_both_wordings_go_through_it(self):
+        # The live finding and the one that says the other claim went away.
+        self.assertIn("nameTheOtherClaim(msg, wentAway", self.app)
+        self.assertEqual(1, self.app.count("msg.className=\"msg\";"))
