@@ -55,7 +55,6 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_logs as logs,
     aws_s3 as s3,
-    aws_sns as sns,
     aws_lambda_event_sources as lambda_sources,
     aws_events as events,
     aws_events_targets as events_targets,
@@ -68,6 +67,11 @@ from aws_cdk import (
     aws_route53_targets as targets,
 )
 from constructs import Construct
+
+from expensifyai.whatsapp_inbound import (
+    REGION as WA_INBOUND_REGION,
+    TOPIC as WA_INBOUND_TOPIC,
+)
 
 # OpenAI model. Overridable with `-c model_id=...` without touching code.
 #
@@ -1087,29 +1091,37 @@ class ExpensifyAIStack(Stack):
         # things it needs that the Graph path did not:
         #
         # A topic, because this is where inbound arrives. Meta POSTs to a URL;
-        # End User Messaging publishes to SNS, and the WABA's event
-        # destination has to be pointed at this topic by hand - the WABA is
-        # linked outside CloudFormation, in the console, so the stack can
-        # create the topic but cannot subscribe the account to it. `wa/`
-        # carries a command that does it.
+        # End User Messaging publishes to SNS instead. That topic cannot live
+        # here: an event destination must be in the same region as the WABA,
+        # which is us-east-1, and `PutWhatsAppBusinessAccountEventDestinations`
+        # refuses anything else with "Invalid EventDestination Region". So the
+        # topic is declared by ExpenzeWhatsAppInbound and this function is
+        # subscribed to it across regions, which SNS permits for Lambda.
+        #
+        # Named by convention rather than passed in. A cross-region, cross-stack
+        # reference costs a custom resource and a deploy ordering constraint,
+        # and both ends of this one are fixed strings we chose.
         #
         # And permission, because the credential stops being a bearer token
         # kept in the secret and becomes this function's own role. That is the
         # real prize here: nothing left to leak, and nothing left to rotate.
-        wa_inbound = sns.Topic(
+        wa_inbound_arn = (f"arn:aws:sns:{WA_INBOUND_REGION}:{self.account}"
+                          f":{WA_INBOUND_TOPIC}")
+        lambda_.CfnPermission(
             self,
-            "WhatsAppInbound",
-            topic_name="expenze-whatsapp-inbound",
-            display_name="Inbound WhatsApp from AWS End User Messaging",
+            "WhatsAppInboundInvoke",
+            action="lambda:InvokeFunction",
+            function_name=wa_fn.function_name,
+            principal="sns.amazonaws.com",
+            source_arn=wa_inbound_arn,
         )
-        wa_fn.add_event_source(lambda_sources.SnsEventSource(wa_inbound))
 
         # The WABA lives in us-east-1 while the rest of this stack is in
         # ap-southeast-1, so the resource is named across regions. Scoped to
         # this account's social-messaging resources rather than "*": a wildcard
         # here would let the function send from any number the account ever
         # links, including one nobody meant to expose to it.
-        eum_region = self.node.try_get_context("eum_region") or "us-east-1"
+        eum_region = WA_INBOUND_REGION
         wa_fn.add_to_role_policy(iam.PolicyStatement(
             actions=[
                 "social-messaging:SendWhatsAppMessage",
@@ -1129,7 +1141,7 @@ class ExpensifyAIStack(Stack):
 
         CfnOutput(self, "WhatsAppWebhook", value=api.url_for_path("/whatsapp/webhook"))
         CfnOutput(self, "WhatsAppSecret", value=wa_secret.secret_name)
-        CfnOutput(self, "WhatsAppInboundTopic", value=wa_inbound.topic_arn)
+        CfnOutput(self, "WhatsAppInboundTopic", value=wa_inbound_arn)
 
         CfnOutput(self, "MailRuleSet", value=rule_set.receipt_rule_set_name)
         CfnOutput(self, "MailAddress", value=f"receipts@{zone_name}")

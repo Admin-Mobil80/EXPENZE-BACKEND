@@ -498,11 +498,16 @@ def cmd_aws_wire(args) -> None:
     print(f"  AWS id    {number['phoneNumberId']}")
     print(f"  WABA      {account['id']}  quality {number.get('qualityRating','?')}")
 
-    sns = boto3.client("sns", region_name=REGION)
+    # In the WABA's region, not ours. An event destination may only name a
+    # topic in the same region as the account it belongs to; anything else is
+    # refused with "Invalid EventDestination Region". The adapter that consumes
+    # it stays in ap-southeast-1, subscribed across regions.
+    sns = boto3.client("sns", region_name=region)
     topic = next((t["TopicArn"] for t in sns.list_topics().get("Topics", [])
                   if t["TopicArn"].rsplit(":", 1)[-1] == INBOUND_TOPIC), "")
     if not topic:
-        sys.exit(f"No SNS topic named {INBOUND_TOPIC} in {REGION}. Deploy the stack first.")
+        sys.exit(f"No SNS topic named {INBOUND_TOPIC} in {region}. "
+                 "Deploy ExpenzeWhatsAppInbound first.")
 
     # Inbound stops arriving at the API Gateway webhook the moment AWS owns
     # the delivery, so this has to be in place before the transport flips -

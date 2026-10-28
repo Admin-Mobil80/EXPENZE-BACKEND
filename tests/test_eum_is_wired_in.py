@@ -97,12 +97,45 @@ class TheInfrastructureExists(unittest.TestCase):
     def setUp(self):
         with open(os.path.join(ROOT, "expensifyai", "stack.py"), encoding="utf-8") as h:
             self.src = h.read()
+        with open(os.path.join(ROOT, "expensifyai", "whatsapp_inbound.py"),
+                  encoding="utf-8") as h:
+            self.inbound = h.read()
 
     def test_there_is_a_topic_for_inbound(self):
-        self.assertIn('topic_name="expenze-whatsapp-inbound"', self.src)
+        self.assertIn("topic_name=TOPIC", self.inbound)
+        self.assertIn('TOPIC = "expenze-whatsapp-inbound"', self.inbound)
 
-    def test_the_adapter_is_subscribed_to_it(self):
-        self.assertIn("lambda_sources.SnsEventSource(wa_inbound)", self.src)
+    def test_the_topic_is_in_the_wabas_region_not_the_apis(self):
+        """An event destination may only name a topic in the WABA's region.
+
+        `PutWhatsAppBusinessAccountEventDestinations` refuses anything else
+        with "Invalid EventDestination Region" - which is clear once you have
+        seen it and says nothing in advance. The topic therefore lives in
+        us-east-1 while the adapter that consumes it stays in ap-southeast-1.
+        """
+        self.assertIn('REGION = "us-east-1"', self.inbound)
+        self.assertIn('CONSUMER_REGION = "ap-southeast-1"', self.inbound)
+
+    def test_the_adapter_is_subscribed_across_regions(self):
+        """With a raw subscription, not the convenience wrapper.
+
+        `LambdaSubscription` also writes the invoke permission, and writes it
+        in this stack's region, where Lambda cannot see a function that lives
+        in another one. The permission is declared beside the function instead.
+        """
+        self.assertIn("sns.CfnSubscription(", self.inbound)
+        self.assertIn('protocol="lambda"', self.inbound)
+        self.assertIn(f'arn:aws:lambda:{{CONSUMER_REGION}}', self.inbound)
+
+    def test_the_topic_is_allowed_to_invoke_the_adapter(self):
+        """Declared beside the function, because the permission belongs to it.
+
+        A subscription SNS accepts is not a subscription that can deliver: the
+        function's own resource policy has to name the topic, and that policy
+        lives in the other region's stack.
+        """
+        self.assertIn('principal="sns.amazonaws.com"', self.src)
+        self.assertIn("source_arn=wa_inbound_arn", self.src)
 
     def test_the_senders_may_call_the_service(self):
         self.assertIn("social-messaging:SendWhatsAppMessage", self.src)

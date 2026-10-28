@@ -20,6 +20,7 @@ import aws_cdk as cdk
 from expensifyai import tagging
 from expensifyai.stack import ExpensifyAIStack
 from expensifyai.site_stack import ExpenzeSiteStack
+from expensifyai.whatsapp_inbound import ExpenzeWhatsAppInboundStack
 
 # Mobil80 shared account. Override only when moving Expenze to a dedicated
 # account - at which point this is the single line that changes.
@@ -87,6 +88,17 @@ ExpenzeSiteStack(
     bucket_suffix="bms",
     env=US_EAST_1,
     description="Expenze - bms.expenze.ai application on CloudFront",
+)
+
+# Inbound WhatsApp, which is in us-east-1 for a reason of its own: an End User
+# Messaging event destination must name a topic in the WABA's region, and the
+# WABA is linked there. The adapter that consumes it stays in ap-southeast-1
+# with the rest of the API, subscribed across regions.
+ExpenzeWhatsAppInboundStack(
+    app,
+    "ExpenzeWhatsAppInbound",
+    env=US_EAST_1,
+    description="Expenze - inbound WhatsApp topic for AWS End User Messaging",
 )
 
 # Every resource is attributable on the shared invoice.

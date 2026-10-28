@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from expensifyai import tagging  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-STACKS = ("ExpensifyAI", "ExpenzeSite", "ExpenzeBms")
+STACKS = ("ExpensifyAI", "ExpenzeSite", "ExpenzeBms", "ExpenzeWhatsAppInbound")
 
 # Types that appear in the templates, charge nothing, and are deliberately left
 # out of the map. Naming them here means a new free resource type shows up as a
