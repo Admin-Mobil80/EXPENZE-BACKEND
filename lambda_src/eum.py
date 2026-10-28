@@ -144,6 +144,22 @@ def number_for(cfg: dict[str, Any], meta_phone_number_id: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 
+def _e164(number: str) -> str:
+    """`+919845000000`, from whatever shape the caller had.
+
+    The one thing AWS does not take verbatim. Meta reports an inbound sender
+    as bare digits and accepts them back the same way; End User Messaging
+    refuses them with "Invalid destination phone number or message Id", which
+    names two different things and tells you which neither of them is.
+
+    Normalised here rather than at the three call sites, because they got
+    their numbers from three different places - an inbound payload, a
+    membership record, and a sign-in form - and only this module cares.
+    """
+    digits = "".join(ch for ch in str(number) if ch.isdigit())
+    return f"+{digits}" if digits else ""
+
+
 def send(cfg: dict[str, Any], message: dict[str, Any],
          meta_from_id: str = "") -> bool:
     """Send one WhatsApp Message object. True when AWS accepted it.
@@ -159,6 +175,10 @@ def send(cfg: dict[str, Any], message: dict[str, Any],
     if not number:
         logger.warning("no AWS phone number id for Meta number %s", meta_from_id or "(default)")
         return False
+    # The caller's dict is left alone: it belongs to them, and on the Meta
+    # path the bare form is the correct one.
+    if message.get("to"):
+        message = {**message, "to": _e164(message["to"])}
     try:
         _client(region(cfg)).send_whatsapp_message(
             originationPhoneNumberId=number,
@@ -204,18 +224,52 @@ def fetch_media(cfg: dict[str, Any], media_id: str, meta_from_id: str,
             mediaId=media_id, originationPhoneNumberId=number, metadataOnly=True)
         mime = str(meta.get("mimeType") or "")
 
-        # Generous, and deliberately so: this only exists to avoid writing a
-        # video to S3 before refusing it. `receipts.put` enforces the real one.
-        stated_kb = int(meta.get("fileSize") or 0)
-        if stated_kb and stated_kb * 1024 > max_bytes * 4:
-            logger.info("media %s is about %d KB; refusing before download",
-                        media_id, stated_kb)
+        # Bytes, whatever the documentation says.
+        #
+        # `GetWhatsAppMessageMedia` documents fileSize as KB. It is not: a
+        # 305 KB photograph reports 312299, which is its size in bytes. Read
+        # as KB that is 305 MB, and the first real receipt sent through this
+        # path was refused before it was ever downloaded - the sender got
+        # nothing at all, because the apology failed too.
+        #
+        # Generous even so, because this guard only exists to avoid writing a
+        # video to S3 before refusing it. `receipts.put` enforces the real
+        # limit, on the bytes that actually arrived.
+        stated = int(meta.get("fileSize") or 0)
+        if stated and stated > max_bytes * 4:
+            logger.info("media %s states %d bytes; refusing before download",
+                        media_id, stated)
             return None
 
+        # A presigned PUT rather than `destinationS3File`, for two reasons.
+        #
+        # The service runs in the WABA's region, us-east-1, and the receipts
+        # bucket is in ap-southeast-1 with the rest of Expenze. Naming the
+        # bucket directly is refused with "S3 location not accessible". A
+        # presigned URL is an ordinary HTTPS PUT against the bucket's own
+        # regional endpoint, carrying our authorisation with it, so neither
+        # the region nor a bucket policy for the service principal arises.
+        #
+        # And `destinationS3File.key` is a *prefix*: AWS appends the media id
+        # to it and the object does not land where it was told to. A presigned
+        # URL writes to exactly the key it was signed for, which is the key
+        # read back below.
+        # Content-Type is required, and it has to be signed for as well as
+        # sent: the service refuses the call without the header, and S3 would
+        # refuse the PUT if the header did not match the signature. Both sides
+        # take it from the metadata call above, so they cannot disagree.
+        ctype = mime or "application/octet-stream"
+        url = _s3().generate_presigned_url(
+            "put_object",
+            Params={"Bucket": RECEIPTS_BUCKET, "Key": key, "ContentType": ctype},
+            ExpiresIn=300,
+            HttpMethod="PUT",
+        )
         client.get_whatsapp_message_media(
             mediaId=media_id,
             originationPhoneNumberId=number,
-            destinationS3File={"bucketName": RECEIPTS_BUCKET, "key": key},
+            destinationS3PresignedUrl={"url": url,
+                                       "headers": {"Content-Type": ctype}},
         )
         body = _s3().get_object(Bucket=RECEIPTS_BUCKET, Key=key)["Body"]
         # One byte past the limit is enough to know it is over, and stops a

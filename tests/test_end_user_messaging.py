@@ -118,7 +118,7 @@ class TheMessageIsNotTouched(unittest.TestCase):
                 return {"messageId": "wamid.1"}
 
         message = {
-            "messaging_product": "whatsapp", "to": "919", "type": "template",
+            "messaging_product": "whatsapp", "to": "+919", "type": "template",
             "template": {"name": "expenze_claim_settled",
                          "language": {"code": "en"},
                          "components": [{"type": "body", "parameters": [
@@ -127,9 +127,44 @@ class TheMessageIsNotTouched(unittest.TestCase):
         with mock.patch.object(eum, "_client", return_value=Client()):
             self.assertTrue(eum.send(LIVE, message))
 
+        # Everything except the destination, which is normalised - see
+        # `test_the_destination_is_rewritten_to_e164`. The template, its
+        # language and every parameter arrive exactly as they were built.
         self.assertEqual(json.loads(sent["message"].decode()), message)
         self.assertEqual(sent["originationPhoneNumberId"], AWS_ID)
         self.assertTrue(sent["metaApiVersion"].startswith("v"))
+
+    def test_the_destination_is_rewritten_to_e164(self):
+        """The one field AWS will not take verbatim.
+
+        Meta reports an inbound sender as bare digits and takes them back the
+        same way. End User Messaging refuses them - "Invalid destination phone
+        number or message Id" - and the first real receipt through this path
+        got no acknowledgement at all because of it.
+        """
+        sent = {}
+
+        class Client:
+            def send_whatsapp_message(self, **kw):
+                sent.update(kw)
+
+        for given in ("919845003881", "+919845003881", "+91 98450 03881"):
+            with mock.patch.object(eum, "_client", return_value=Client()):
+                eum.send(LIVE, {"messaging_product": "whatsapp", "to": given,
+                                "type": "text", "text": {"body": "hello"}})
+            self.assertEqual(json.loads(sent["message"].decode())["to"],
+                             "+919845003881", f"from {given!r}")
+
+    def test_the_callers_dict_is_not_mutated(self):
+        """It belongs to them, and on the Meta path bare digits are correct."""
+        class Client:
+            def send_whatsapp_message(self, **kw):
+                pass
+
+        message = {"to": "919845003881", "type": "text"}
+        with mock.patch.object(eum, "_client", return_value=Client()):
+            eum.send(LIVE, message)
+        self.assertEqual(message["to"], "919845003881")
 
     def test_a_refusal_is_reported_not_raised(self):
         """The settlement already happened; a bounced notice must not undo it.
@@ -205,6 +240,20 @@ class InboundArrivesWrapped(unittest.TestCase):
 class MediaNeverArrivesInline(unittest.TestCase):
     """AWS returns a size and a type and writes the bytes to S3."""
 
+    def test_an_ordinary_photograph_is_not_refused(self):
+        """fileSize is bytes, whatever the documentation says.
+
+        AWS documents it as KB. A 305 KB photo reports 312299 - its size in
+        bytes. Read as KB that is 305 MB, and the first real receipt sent
+        through this path was refused before it was ever downloaded. The
+        sender got nothing, because the apology failed too.
+        """
+        client, s3, _ = self._client_and_s3(size_kb=312299, body=b"x" * 100)
+        with mock.patch.object(eum, "_client", return_value=client), \
+             mock.patch.object(eum, "_s3", return_value=s3):
+            got = eum.fetch_media(LIVE, "media-1", META_ID, 10 * 1024 * 1024)
+        self.assertEqual(got, (b"x" * 100, "image/jpeg"))
+
     def _client_and_s3(self, mime="image/jpeg", size_kb=12, body=b"x" * 100):
         staged = {}
 
@@ -212,11 +261,18 @@ class MediaNeverArrivesInline(unittest.TestCase):
             def get_whatsapp_message_media(self, **kw):
                 if kw.get("metadataOnly"):
                     return {"mimeType": mime, "fileSize": size_kb}
-                staged["key"] = kw["destinationS3File"]["key"]
+                staged["url"] = kw["destinationS3PresignedUrl"]["url"]
+                staged["headers"] = kw["destinationS3PresignedUrl"]["headers"]
                 return {}
 
         class S3:
+            def generate_presigned_url(self, op, Params, **kw):
+                staged["key"] = Params["Key"]
+                staged["signed_ctype"] = Params.get("ContentType")
+                return f"https://s3.example/{Params['Key']}?signed"
+
             def get_object(self, Bucket, Key):
+                staged["read"] = Key
                 return {"Body": mock.Mock(read=lambda n: body[:n])}
 
             def delete_object(self, Bucket, Key):
@@ -230,6 +286,47 @@ class MediaNeverArrivesInline(unittest.TestCase):
              mock.patch.object(eum, "_s3", return_value=s3):
             got = eum.fetch_media(LIVE, "media-1", META_ID, 10 * 1024 * 1024)
         self.assertEqual(got, (b"x" * 100, "image/jpeg"))
+
+    def test_it_is_written_by_presigned_url_not_by_bucket_name(self):
+        """Naming the bucket is refused across regions, and mangles the key.
+
+        The service runs in the WABA's region and the receipts bucket is in
+        ours: `destinationS3File` gives "S3 location not accessible". It also
+        treats `key` as a prefix and appends the media id, so the object does
+        not land where it was told to and the read-back misses it.
+        """
+        client, s3, staged = self._client_and_s3()
+        with mock.patch.object(eum, "_client", return_value=client), \
+             mock.patch.object(eum, "_s3", return_value=s3):
+            eum.fetch_media(LIVE, "media-1", META_ID, 10 * 1024 * 1024)
+        self.assertIn("signed", staged["url"])
+        # Signed for, written to, and read back: one key, not three.
+        self.assertEqual(staged["key"], staged["read"])
+        self.assertEqual(staged["read"], staged["deleted"])
+
+    def test_the_content_type_is_both_signed_for_and_sent(self):
+        """The service requires the header; S3 requires it to match.
+
+        "Content-Type header is required in S3PresignedUrl" if it is not sent,
+        and a signature mismatch from S3 if it is sent but was not signed for.
+        Both come from the metadata call, so they cannot disagree.
+        """
+        client, s3, staged = self._client_and_s3(mime="application/pdf")
+        with mock.patch.object(eum, "_client", return_value=client), \
+             mock.patch.object(eum, "_s3", return_value=s3):
+            eum.fetch_media(LIVE, "media-1", META_ID, 10 * 1024 * 1024)
+        self.assertEqual(staged["signed_ctype"], "application/pdf")
+        self.assertEqual(staged["headers"], {"Content-Type": "application/pdf"})
+
+    def test_media_with_no_stated_type_still_has_one(self):
+        """An empty Content-Type is refused the same as a missing one."""
+        client, s3, staged = self._client_and_s3(mime="")
+        with mock.patch.object(eum, "_client", return_value=client), \
+             mock.patch.object(eum, "_s3", return_value=s3):
+            eum.fetch_media(LIVE, "media-1", META_ID, 10 * 1024 * 1024)
+        self.assertEqual(staged["signed_ctype"], "application/octet-stream")
+        self.assertEqual(staged["headers"]["Content-Type"],
+                         "application/octet-stream")
 
     def test_the_staged_copy_is_always_removed(self):
         """It exists only to carry the bytes across.
@@ -285,7 +382,9 @@ class MediaNeverArrivesInline(unittest.TestCase):
         class Client:
             def get_whatsapp_message_media(self, **kw):
                 if kw.get("metadataOnly"):
-                    return {"mimeType": "video/mp4", "fileSize": 500_000}
+                    # Half a gigabyte, in bytes. Four times the limit is the
+                    # threshold, so this is refused and a 305 KB photo is not.
+                    return {"mimeType": "video/mp4", "fileSize": 500_000_000}
                 downloaded.append(kw)
                 return {}
 
