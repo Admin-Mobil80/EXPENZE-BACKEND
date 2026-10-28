@@ -397,6 +397,41 @@ def _handle_message(msg: dict[str, Any], cfg: dict[str, str], from_id: str = "")
     else:
         logger.info("intake returned %s for a resolved sender", status)
 
+def _record_status(status: dict[str, Any]) -> None:
+    """What WhatsApp did with a message we sent, which is not what AWS said.
+
+    `SendWhatsAppMessage` returning without raising means AWS accepted it, not
+    that anybody received it. Delivery - and refusal - arrive afterwards, as a
+    status webhook on the same SNS topic the receipts come in on, and this
+    adapter walked straight past them: `_dispatch` read `messages` and nothing
+    else, so every one of them was parsed and dropped.
+
+    That is why an acknowledgement nobody got was indistinguishable, in every
+    log we had, from one sitting on somebody's phone. The send succeeded, the
+    handler logged nothing, and the only way to learn it had not arrived was
+    for the person to say so. Meta was telling us the whole time.
+
+    A refusal is logged at error with Meta's own code and title, because that
+    is the line somebody debugging "I sent a receipt and heard nothing" has to
+    be able to find. Everything else goes out quietly - it is a heartbeat, not
+    an event, and there are a few hundred a week.
+
+    The recipient is named by its last four digits, as everywhere else here:
+    enough for whoever sent it to recognise, useless to anybody else reading
+    CloudWatch.
+    """
+    who = str(status.get("recipient_id") or "")
+    tail = who[-4:] if len(who) >= 4 else "????"
+    state = str(status.get("status") or "unknown")
+    errors = status.get("errors") or []
+    if state == "failed" or errors:
+        for err in (errors or [{}]):
+            detail = (err.get("error_data") or {}).get("details") or err.get("message") or ""
+            logger.error("WhatsApp did NOT deliver to ...%s: %s (code %s) %s",
+                         tail, err.get("title") or state, err.get("code") or "-", detail)
+        return
+    logger.info("WhatsApp reports %s to ...%s", state, tail)
+
 
 def _dispatch(entries: list[dict[str, Any]], cfg: dict[str, str]) -> None:
     """Walk Meta's entry shape and handle every message in it.
@@ -414,6 +449,11 @@ def _dispatch(entries: list[dict[str, Any]], cfg: dict[str, str]) -> None:
             from_id = str((value.get("metadata") or {}).get("phone_number_id") or "")
             for msg in value.get("messages", []):
                 _handle_message(msg, cfg, from_id)
+            # And what became of the ones we sent. A status is not a receipt
+            # arriving, so it is not `_handle_message`'s business - but it is
+            # the only place a refused delivery is ever reported.
+            for status in value.get("statuses", []):
+                _record_status(status)
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
