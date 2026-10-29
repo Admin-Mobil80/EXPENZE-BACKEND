@@ -38,8 +38,35 @@ class ArrivingTogetherIsWhatSettlesIt(unittest.TestCase):
         # receipts in one email is ordinary, and two of them can honestly be
         # the same amount at the same shop on the same day.
         self.assertIn('source_ref = str(row.get("source_ref", "") or "")', self.worker)
-        self.assertIn("same_message = bool(source_ref) and bool(this_invoice) and held", self.worker)
+        self.assertIn("bool(source_ref) and bool(this_invoice) and held", self.worker)
         self.assertIn("_invoice_of(held) == this_invoice", self.worker)
+
+    def test_the_sibling_is_asked_about_before_the_duplicate_index(self):
+        """Mobil80-Exp-219 and Exp-220: one Eleven Labs charge, one email.
+
+        The invoice and its receipt, with the same number printed on both -
+        and both went to a reviewer flagged against Exp-197, which was last
+        month's copy of the same invoice from a different email.
+
+        `claim()` returns the *oldest* holder of a key. So the comparison was
+        made against a claim from another envelope, found the deliveries
+        differed, and concluded these were not companions - without ever
+        looking at the sibling two attachments below. The question has to be
+        asked of the envelope directly, not of whatever the index returns.
+        """
+        self.assertIn("duplicates.sibling_key(", self.worker)
+        # Taken before the loop over the generic keys, so an older copy of the
+        # same invoice cannot get in the way of the sibling.
+        self.assertLess(self.worker.index("sibling_fp = duplicates.sibling_key("),
+                        self.worker.index('held, caught_by = None, ""'))
+        self.assertIn("same_message = bool(sibling) or (", self.worker)
+        self.assertIn("companion_of = _reference_of(sibling or held)", self.worker)
+
+    def test_the_sibling_key_needs_both_halves(self):
+        """A delivery with no invoice number proves nothing, and vice versa."""
+        dup = src("lambda_src", "duplicates.py")
+        fn = dup.split("def sibling_key(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("if not org_id or not source_ref or not token", fn)
 
     def test_a_bill_with_no_invoice_number_is_never_absorbed(self):
         # It proves nothing about another bill that also has none.

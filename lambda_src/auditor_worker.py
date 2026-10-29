@@ -416,6 +416,19 @@ def _audit_one(row: dict[str, Any]) -> None:
         # named, finds the dates differ and concludes the system is wrong has
         # been told something untrue - and the next flag, the real one, is
         # worth less for it.
+        # The sibling in the same envelope, asked first.
+        #
+        # An invoice and its own receipt in one email is not a judgment call,
+        # so it must not depend on which claim the duplicate index happens to
+        # return. It did: `claim()` hands back the oldest holder of a key, and
+        # when last month's copy of the same invoice was already on file the
+        # sibling two attachments below was never compared with. Exp-219 and
+        # Exp-220 - one invoice, one receipt, one Eleven Labs charge, one
+        # email - both went to a reviewer flagged against Exp-197 instead.
+        sibling_fp = duplicates.sibling_key(
+            org_id, source_ref, receipt.get("invoice_number", ""))
+        sibling = duplicates.claim(sibling_fp, submission_id) if sibling_fp else None
+
         held, caught_by = None, ""
         for key, label, extra in (
                 (sender_fp, "submitter", {}),
@@ -463,11 +476,16 @@ def _audit_one(row: dict[str, Any]) -> None:
         # left to a person.
         this_invoice = taxlike(receipt.get("invoice_number"))
 
-        same_message = bool(source_ref) and bool(this_invoice) and held and (
-            _source_ref_of(held) == source_ref
-            and _invoice_of(held) == this_invoice)
+        # `sibling` already proves it: one delivery, one invoice number. The
+        # comparison against `held` stays for the case where the index handed
+        # back the sibling itself, which is what happens when no older copy of
+        # the invoice exists.
+        same_message = bool(sibling) or (
+            bool(source_ref) and bool(this_invoice) and held and (
+                _source_ref_of(held) == source_ref
+                and _invoice_of(held) == this_invoice))
         if same_message:
-            companion_of = _reference_of(held) or held
+            companion_of = _reference_of(sibling or held) or (sibling or held)
             verdict["companion_of"] = companion_of
             logger.info("%s is a second document of %s, from the same message",
                         submission_id, companion_of)

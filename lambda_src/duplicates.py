@@ -201,6 +201,32 @@ def invoice_token(invoice_number: str) -> str:
     return number.translate(_CONFUSABLE)
 
 
+def sibling_key(org_id: str, source_ref: str, invoice_number: str) -> str:
+    """One delivery, one invoice number: the second document of one purchase.
+
+    An invoice and its receipt arrive in a single email constantly - the
+    vendor sends both, the employee forwards the lot. Each attachment becomes
+    a claim, so one charge becomes two.
+
+    `auditor_worker` already knew what to do about that, but it only ever
+    asked the question about whichever claim the duplicate index happened to
+    hand back, and that is the *oldest* holder of the key rather than the one
+    in the same envelope. When last month's copy of the same invoice was
+    already on file, the sibling two lines below in the same email was never
+    compared with - and an invoice and its own receipt went to a reviewer as
+    two claims, each flagged a possible duplicate of a third.
+
+    This key makes the siblings collide with each other and with nothing else.
+    One delivery is one `source_ref`; `mail://` for an email, empty for
+    anything that arrived alone. Both halves must be present: a claim with no
+    delivery or no invoice number proves nothing about another one with none.
+    """
+    token = invoice_token(invoice_number)
+    if not org_id or not source_ref or not token:
+        return ""
+    return f"{org_id}#sibling#{source_ref}#{token}"
+
+
 def invoice_key(org_id: str, vendor: str, invoice_number: str) -> str:
     """The one duplicate signal that is not a guess.
 
