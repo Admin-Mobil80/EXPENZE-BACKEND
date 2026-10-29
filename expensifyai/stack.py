@@ -1004,7 +1004,13 @@ class ExpensifyAIStack(Stack):
             rules=[
                 ses.ReceiptRuleOptions(
                     receipt_rule_name="expenze-receipts",
-                    recipients=[f"receipts@{zone_name}", otp_sender],
+                    # `receipt@` as well as `receipts@`. One address is
+                    # advertised - INTAKE_ADDRESS, what every message and
+                    # every page says - and the singular is a silent catch
+                    # for the people who type it that way. A receipt that
+                    # bounces is a claim nobody makes twice.
+                    recipients=[f"receipts@{zone_name}", f"receipt@{zone_name}",
+                                otp_sender],
                     scan_enabled=True,   # spam and virus verdicts from SES
                     actions=[
                         ses_actions.S3(bucket=mail_bucket, object_key_prefix="inbox/")
