@@ -340,11 +340,17 @@ def outcome_notice(claim: dict[str, Any]) -> dict[str, str]:
                 "for payment.")
         tail = PENDING
     elif nothing_read:
+        # Refused, and said plainly. This used to end "it has gone to your
+        # finance team anyway, so you do not need to do anything" - which was
+        # false comfort: nobody could read it there either, and the person who
+        # could fix it in ten seconds was told to do nothing while they still
+        # had the bill in their hand.
         head = (f"*{vendor}*\n\n"
-                "We could not read this one — the photograph is too blurred or "
-                "dark to make out the amounts. It has gone to your finance team "
-                "anyway, so you do not need to do anything; a clearer photo of "
-                "the same bill would help them.")
+                "❌ We could not read this one — the photograph is too blurred or "
+                "dark to make out the amounts, so it has not been claimed.\n\n"
+                "Send a clearer photograph of the same bill and it will be "
+                "audited as a new claim. Daylight, the whole bill in frame and "
+                "the camera square to the paper is usually enough.")
         tail = ""
     else:
         head = (f"*{vendor}* — {total}\n\n"

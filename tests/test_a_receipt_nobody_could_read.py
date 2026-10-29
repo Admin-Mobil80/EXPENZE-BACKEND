@@ -200,7 +200,7 @@ class TheSubmitterIsNotQuotedAFigureNobodyRead(unittest.TestCase):
         worker = read("lambda_src/auditor_worker.py")
         # To the closing brace of the call, not the first "})" - the dict
         # contains `{}` defaults of its own.
-        send = worker.split('notify.send("outcome", member, {', 1)[1].split(
+        send = worker.split("notify.send(kind, member, {", 1)[1].split(
             "\n        })", 1)[0]
         self.assertIn('"violations": verdict.get("violations") or []', send)
 
@@ -237,7 +237,14 @@ class ADecidedClaimIsNotMessagedAgain(unittest.TestCase):
     def test_the_older_guard_is_still_there(self):
         # Two different repeats: the same outcome twice, and an outcome after
         # a decision. Neither implies the other.
-        self.assertIn('if str(told.get("kind") or "") == "outcome":', self.fn)
+        #
+        # It now covers `rejected` as well, because the agent itself sends one
+        # for an unreadable photograph. Keying only on `outcome` would let a
+        # re-audit of a refused claim message its submitter a second time -
+        # which is the exact failure this guard was written for, arriving by
+        # the other door.
+        self.assertIn('if str(told.get("kind") or "") in ("outcome", "rejected"):',
+                      self.fn)
 
     def test_both_run_before_anything_is_sent(self):
         self.assertLess(self.fn.index('row.get("review_action")'),
@@ -308,3 +315,81 @@ class ALineWithNoPriceIsNotAFailure(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnUnreadablePhotographIsRefused(unittest.TestCase):
+    """Mobil80-Exp-221, and the queue it should never have reached.
+
+    The claim went to Finance with "it has gone to your finance team anyway,
+    so you do not need to do anything" - which moved the problem to the one
+    person who cannot solve it. A reviewer holding a photograph too dark to
+    show a total has the same two options the submitter had and less context:
+    ask for a clearer picture, or guess.
+
+    The submitter can fix it in the ten seconds it takes to retake the photo,
+    and only while they still have the bill. So it is refused at the audit and
+    they are told immediately, rather than a week later by somebody who queued
+    to say it.
+
+    The credit stays spent - the reading was attempted - and Finance still
+    sees the claim under Rejected, so a submitter who insists the photograph
+    was fine has something to point at.
+    """
+
+    def setUp(self):
+        self.worker = read("lambda_src/auditor_worker.py")
+        self.notify = read("lambda_src/notify.py")
+
+    def test_the_verdict_is_a_refusal_not_a_review(self):
+        self.assertIn('rejected_unreadable = policy.blocks_on(verdict, "nothing_read")',
+                      self.worker)
+        self.assertIn('verdict["verdict"] = "rejected"', self.worker)
+
+    def test_nothing_is_reimbursable_on_a_bill_nobody_read(self):
+        block = self.worker.split("rejected_unreadable = ", 1)[1][:600]
+        self.assertIn('verdict["reimbursable_total"] = "0.00"', block)
+
+    def test_finance_sees_it_as_rejected(self):
+        # `review_action` is what `policy.stage` reads to put a claim under
+        # Rejected rather than in the queue.
+        self.assertIn('":ra": "rejected" if rejected_unreadable else ""', self.worker)
+        self.assertIn('":rr": (UNREADABLE_REASON if rejected_unreadable else "")',
+                      self.worker)
+
+    def test_nothing_else_is_marked_decided_by_this(self):
+        """The same write runs for every audited claim.
+
+        An empty `review_action` is what an undecided claim has, so writing it
+        unconditionally leaves a normal claim exactly as it was. Writing
+        "rejected" unconditionally would refuse every receipt in the account.
+        """
+        for field in ('":ra"', '":rr"', '":rb"'):
+            line = [l for l in self.worker.splitlines() if field in l][0]
+            self.assertIn("if rejected_unreadable else", line)
+
+    def test_the_credit_is_not_given_back(self):
+        """Deliberate: the reading was attempted and cost what it cost.
+
+        `_refund_one_credit` exists and is used for companions. It must not be
+        reached from the refusal path.
+        """
+        block = self.worker.split("rejected_unreadable = ", 1)[1][:600]
+        self.assertNotIn("_refund_one_credit", block)
+
+    def test_the_submitter_is_told_it_was_not_claimed(self):
+        # The message itself, not the comment above it - which quotes the old
+        # wording in order to explain why it went.
+        notice = self.notify.split("elif nothing_read:", 1)[1].split(
+            "head = (", 1)[1].split("tail =", 1)[0]
+        self.assertIn("has not been claimed", notice)
+        self.assertIn("clearer photograph", notice)
+        # The old wording promised the opposite and must not come back.
+        self.assertNotIn("gone to your finance team", notice)
+        self.assertNotIn("you do not need to do anything", notice)
+
+    def test_the_rejection_notice_is_the_one_that_goes(self):
+        """Not the outcome notice, which says a person will look at it."""
+        self.assertIn('kind = ("rejected" if str(verdict.get("verdict") or "") == "rejected"',
+                      self.worker)
+        self.assertIn("notify.send(kind, member, {", self.worker)
+        self.assertIn('"reason": UNREADABLE_REASON', self.worker)

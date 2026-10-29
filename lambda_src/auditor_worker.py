@@ -194,6 +194,14 @@ def _reference_of(submission_id: str) -> str:
     return str(_other_claim(submission_id).get("reference") or "")
 
 
+# The words a reviewer sees against a refused photograph, and the words the
+# submitter is told. One string, so the two cannot drift apart.
+UNREADABLE_REASON = (
+    "Nothing could be read off this photograph - no line items and no printed "
+    "total. A clearer photograph of the same bill can be sent in as a new claim."
+)
+
+
 def taxlike(value: Any) -> str:
     """An invoice number reduced to what identifies it.
 
@@ -591,6 +599,30 @@ def _audit_one(row: dict[str, Any]) -> None:
             })
             verdict["verdict"] = "needs_review"
 
+        # A bill nobody can read is refused here, not queued.
+        #
+        # It used to go to the review queue with "it has gone to your finance
+        # team anyway, so you do not need to do anything" - which moved the
+        # problem to the one person who cannot solve it. A reviewer looking at
+        # a photograph too dark to show a total has the same two options the
+        # submitter had and less context: ask for a clearer picture, or guess.
+        #
+        # The submitter is the only one who can fix it, usually in the ten
+        # seconds it takes to retake the photo, and only while they still have
+        # the bill. So the claim is refused now and they are told why, rather
+        # than a week later by somebody who waited in a queue to say it.
+        #
+        # The credit is not given back: the reading was attempted and cost
+        # what it cost. Finance still sees the claim under Rejected, so a
+        # submitter who insists the photograph was fine has something to point
+        # at and a reviewer can reopen it.
+        rejected_unreadable = policy.blocks_on(verdict, "nothing_read")
+        if rejected_unreadable:
+            verdict["verdict"] = "rejected"
+            verdict["reimbursable_total"] = "0.00"
+            logger.info("%s refused: nothing could be read off the receipt",
+                        submission_id)
+
         # Written onto the submission itself, so the console reads one row per
         # receipt rather than joining two tables to show a line.
         _intake.update_item(
@@ -601,10 +633,17 @@ def _audit_one(row: dict[str, Any]) -> None:
                               "budget_value = :bv, sender_fingerprint = :sf, "
                               "repeat_fingerprint = :rf, "
                               "payout_value = :pv, companion_of = :co, "
-                              "group_id = :g, group_status = :gs REMOVE last_error"),
+                              "group_id = :g, group_status = :gs, "
+                              "review_action = :ra, review_reason = :rr, "
+                              "review_by = :rb REMOVE last_error"),
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={
                 ":s": "audited",
+                # Empty for everything else, so this writes nothing where a
+                # person's decision would go.
+                ":ra": "rejected" if rejected_unreadable else "",
+                ":rr": (UNREADABLE_REASON if rejected_unreadable else ""),
+                ":rb": ("Expenze" if rejected_unreadable else ""),
                 # The claim this is a second document of, or empty. Read by the
                 # console to keep it out of the queue and the payment run.
                 ":co": verdict.get("companion_of", ""),
@@ -694,7 +733,7 @@ def _tell_sender(row: dict[str, Any], verdict: dict[str, Any]) -> None:
         # same record the console reads - so there is one answer to "has this
         # person been told", not two that can disagree.
         told = (row.get("last_notice") or {})
-        if str(told.get("kind") or "") == "outcome":
+        if str(told.get("kind") or "") in ("outcome", "rejected"):
             logger.info("%s: the sender has already been told the outcome",
                         row.get("submission_id"))
             return
@@ -725,7 +764,15 @@ def _tell_sender(row: dict[str, Any], verdict: dict[str, Any]) -> None:
         # One message with one of two things in it: the agent cleared this and
         # finance will pay it, or a person is going to look at it. Nothing is
         # ever asked of the sender - see notify.outcome_notice.
-        result = notify.send("outcome", member, {
+        # A refused claim gets the rejection notice, not the outcome one: the
+        # outcome notice says a person is going to look at it, and for an
+        # unreadable photograph nobody is.
+        kind = ("rejected" if str(verdict.get("verdict") or "") == "rejected"
+                else "outcome")
+        result = notify.send(kind, member, {
+            "reason": UNREADABLE_REASON,
+            "rejected_by": "Expenze",
+            "approved": verdict.get("reimbursable_total"),
             "vendor": (row.get("receipt") or {}).get("vendor", ""),
             # The first message about this claim, so the first chance to give
             # them the number they will quote if they ever ask about it.
