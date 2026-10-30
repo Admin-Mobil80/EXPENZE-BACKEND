@@ -40,6 +40,7 @@ import handler
 import identity
 import notify
 import pdfpages
+import policy
 import grouping
 
 logger = logging.getLogger()
